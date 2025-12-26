@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chroma-storage
+  namespace: llm-stack
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chromadb
+  namespace: llm-stack
+spec:
+  serviceName: "chromadb"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chromadb
+  template:
+    metadata:
+      labels:
+        app: chromadb
+    spec:
+      containers:
+      - name: chromadb
+        image: chromadb/chroma:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: IS_PERSISTENT
+          value: "TRUE"
+        - name: PERSIST_DIRECTORY
+          value: "/chroma/chroma"
+        - name: ANONYMIZED_TELEMETRY
+          value: "FALSE"
+        volumeMounts:
+        - name: storage
+          mountPath: /chroma/chroma
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: chroma-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chromadb
+  namespace: llm-stack
+spec:
+  selector:
+    app: chromadb
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000

@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: meilisearch-storage
+  namespace: llm-stack
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: meilisearch
+  namespace: llm-stack
+spec:
+  serviceName: "meilisearch"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: meilisearch
+  template:
+    metadata:
+      labels:
+        app: meilisearch
+    spec:
+      containers:
+      - name: meilisearch
+        image: getmeili/meilisearch:v1.6
+        ports:
+        - containerPort: 7700
+        env:
+        - name: MEILI_MASTER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-stack-secret
+              key: meili-master-key
+        - name: MEILI_ENV
+          value: "production"
+        volumeMounts:
+        - name: data
+          mountPath: /meili_data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: meilisearch-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: meilisearch
+  namespace: llm-stack
+spec:
+  selector:
+    app: meilisearch
+  ports:
+    - protocol: TCP
+      port: 7700
+      targetPort: 7700

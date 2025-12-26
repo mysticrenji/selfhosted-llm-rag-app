@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+test/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Documentation
+README.md
+*.md
+
+# Testing
+.coverage
+htmlcov/
+.tox/
+
+# Pre-commit
+.pre-commit-config.yaml
+.secrets.baseline
+.yamllint
+
+# Development
+local.sh
+Dockerfile
+docker-compose.yml
+.env
+
+# Kubernetes
+k8s/

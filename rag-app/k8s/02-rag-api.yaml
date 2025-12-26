@@ -1,0 +1,109 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-api-config
+  namespace: llm-stack
+data:
+  CHROMA_HOST: "chromadb.llm-stack.svc.cluster.local"
+  CHROMA_PORT: "8000"
+  MEILI_HOST: "http://meilisearch.llm-stack.svc.cluster.local:7700"
+  LLM_API_BASE: "http://litellm.llm-stack.svc.cluster.local:4000"
+  EMBEDDING_MODEL: "text-embedding-3-small"
+  LLM_MODEL: "llama3:latest"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-api
+  namespace: llm-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rag-api
+  template:
+    metadata:
+      labels:
+        app: rag-api
+    spec:
+      containers:
+        - name: rag-api
+          image: ghcr.io/mysticrenji/rag-app:main
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: CHROMA_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-api-config
+                  key: CHROMA_HOST
+            - name: CHROMA_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-api-config
+                  key: CHROMA_PORT
+            - name: MEILI_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-api-config
+                  key: MEILI_HOST
+            - name: MEILI_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-stack-secret
+                  key: meili-master-key
+            - name: LLM_API_BASE
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-api-config
+                  key: LLM_API_BASE
+            - name: EMBEDDING_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-api-config
+                  key: EMBEDDING_MODEL
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-api-config
+                  key: LLM_MODEL
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-stack-secret
+                  key: litellm-master-key
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 45
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-api
+  namespace: llm-stack
+spec:
+  selector:
+    app: rag-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP

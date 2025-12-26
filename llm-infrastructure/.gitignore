@@ -1,0 +1,21 @@
+# Credentials and Secrets
+.env
+.env.*
+
+manifests/001-secrets.yaml
+secret.yaml
+secrets.yaml
+*.secret.yaml
+
+# System Files
+.DS_Store
+Thumbs.db
+*~
+
+# IDE Settings
+.vscode/
+.idea/
+
+# Logs
+*.log
+001-secrets.yaml

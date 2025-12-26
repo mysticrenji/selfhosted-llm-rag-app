@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-pvc
+  namespace: llm-stack
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 25Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openwebui
+  namespace: llm-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openwebui
+  template:
+    metadata:
+      labels:
+        app: openwebui
+    spec:
+      containers:
+      - name: openwebui
+        image: ghcr.io/open-webui/open-webui:main
+        ports:
+        - containerPort: 8080
+        env:
+        - name: OPENAI_API_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: llm-stack-config
+              key: openwebui-openai-base-url
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-stack-secret
+              key: litellm-master-key
+        - name: OLLAMA_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: llm-stack-config
+              key: openwebui-ollama-base-url
+        volumeMounts:
+        - name: webui-storage
+          mountPath: /app/backend/data
+      volumes:
+      - name: webui-storage
+        persistentVolumeClaim:
+          claimName: openwebui-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openwebui
+  namespace: llm-stack
+spec:
+  selector:
+    app: openwebui
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080

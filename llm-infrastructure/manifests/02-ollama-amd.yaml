@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-pvc
+  namespace: llm-stack
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ollama
+  namespace: llm-stack
+spec:
+  serviceName: "ollama"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+      - name: ollama
+        image: ollama/ollama:rocm
+        ports:
+        - containerPort: 11434
+        # --- AMD CONFIGURATION START ---
+        securityContext:
+          privileged: true
+        env:
+        - name: HSA_OVERRIDE_GFX_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: llm-stack-config
+              key: ollama-hsa-override-gfx-version
+        - name: OLLAMA_KEEP_ALIVE
+          valueFrom:
+            configMapKeyRef:
+              name: llm-stack-config
+              key: ollama-keep-alive
+        # --- AMD CONFIGURATION END ---
+        volumeMounts:
+        - name: ollama-storage
+          mountPath: /root/.ollama
+        - name: dev-kfd
+          mountPath: /dev/kfd
+        - name: dev-dri
+          mountPath: /dev/dri
+      volumes:
+      - name: ollama-storage
+        persistentVolumeClaim:
+          claimName: ollama-pvc
+      - name: dev-kfd
+        hostPath:
+          path: /dev/kfd
+      - name: dev-dri
+        hostPath:
+          path: /dev/dri
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: llm-stack
+spec:
+  selector:
+    app: ollama
+  ports:
+    - protocol: TCP
+      port: 11434
+      targetPort: 11434
