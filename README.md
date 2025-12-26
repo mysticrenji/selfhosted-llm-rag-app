@@ -112,7 +112,7 @@ cd llm-rag-app/llm-infrastructure
 kubectl apply -f manifests/
 ```
 
-See [llm-infrastructure/README.md](llm-rag-app/llm-infrastructure/README.md) for detailed instructions.
+See [llm-infrastructure/README.md](llm-infrastructure/README.md) for detailed instructions.
 
 ### 2. Deploy RAG Application
 
@@ -127,12 +127,12 @@ docker build -t rag-api:latest .
 kubectl apply -f k8s/02-rag-api.yaml
 ```
 
-See [rag-app/README.md](llm-rag-app/rag-app/README.md) for detailed instructions.
+See [rag-app/README.md](rag-app/README.md) for detailed instructions.
 
 ## 📖 Documentation
 
-- **[LLM Infrastructure Guide](llm-rag-app/llm-infrastructure/README.md)** - Deploy Ollama, LiteLLM, ChromaDB, Meilisearch
-- **[RAG Application Guide](llm-rag-app/rag-app/README.md)** - Build and run the document Q&A system
+- **[LLM Infrastructure Guide](llm-infrastructure/README.md)** - Deploy Ollama, LiteLLM, ChromaDB, Meilisearch
+- **[RAG Application Guide](rag-app/README.md)** - Build and run the document Q&A system
 - **[API Documentation](http://localhost:8080/docs)** - Interactive API docs (when running)
 
 ## 💻 Hardware Requirements
@@ -220,8 +220,8 @@ See LICENSE file in each component directory.
 ## 🆘 Support
 
 **Common Issues:**
-1. Check [llm-infrastructure troubleshooting](llm-rag-app/llm-infrastructure/README.md#troubleshooting)
-2. Check [rag-app troubleshooting](llm-rag-app/rag-app/README.md#-troubleshooting)
+1. Check [llm-infrastructure troubleshooting](llm-infrastructure/README.md#troubleshooting)
+2. Check [rag-app troubleshooting](rag-app/README.md#-troubleshooting)
 3. Verify all pods are running: `kubectl get pods -n llm-stack`
 
 **Useful Commands:**
