@@ -14,3 +14,5 @@ langchain-docling>=0.1.0
 chromadb>=0.4.22
 # Search Engine
 meilisearch>=0.30.0
+# Observability
+langfuse>=2.0.0
