@@ -1,0 +1,65 @@
+# Secrets (NEVER commit these!)
+**/001-secrets.yaml
+**/001-langfuse-secrets.yaml
+**/*secret*.yaml
+**/*secrets*.yaml
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+*.local
+
+# Credentials
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Kubernetes config (may contain credentials)
+kubeconfig
+*.kubeconfig
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+venv/
+env/
+.venv/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build outputs
+target/
+bin/
+obj/
