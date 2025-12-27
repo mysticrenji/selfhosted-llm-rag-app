@@ -25,8 +25,8 @@ from langchain_docling import DoclingLoader
 from langchain_openai import ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# Langfuse for observability
-from langfuse.callback import CallbackHandler
+# Langfuse for observability (LangChain integration)
+from langfuse.langchain import CallbackHandler
 from pydantic import BaseModel
 
 # Configure logging
@@ -57,6 +57,7 @@ MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024)))  # 50MB d
 
 # Langfuse Configuration
 LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "http://langfuse.llm-stack.svc.cluster.local:3000")
+LANGFUSE_BASE_URL = os.getenv("LANGFUSE_BASE_URL", "http://langfuse.llm-stack.svc.cluster.local:3000")
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
 LANGFUSE_ENABLED = os.getenv("LANGFUSE_ENABLED", "true").lower() == "true"
@@ -91,14 +92,13 @@ logger.info(f"Connecting to LiteLLM at {LLM_API_BASE}")
 langfuse_handler: Optional[CallbackHandler] = None
 if LANGFUSE_ENABLED and LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY:
     try:
-        langfuse_handler = CallbackHandler(
-            public_key=LANGFUSE_PUBLIC_KEY,
-            secret_key=LANGFUSE_SECRET_KEY,
-            host=LANGFUSE_HOST,
-        )
-        logger.info(f"Langfuse observability enabled at {LANGFUSE_HOST}")
+        # Langfuse LangChain callback reads from environment variables:
+        # LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
+        langfuse_handler = CallbackHandler()
+        logger.info(f"Langfuse observability initialized (host: {LANGFUSE_HOST})")
     except Exception as e:
         logger.warning(f"Failed to initialize Langfuse: {e}. Continuing without observability.")
+        langfuse_handler = None
 else:
     logger.info("Langfuse observability disabled")
 
@@ -416,20 +416,12 @@ async def chat(query: Query):
         # Prepare callbacks for Langfuse tracing
         callbacks = [langfuse_handler] if langfuse_handler else []
 
-        # Add session and user tracking if available
+        # Add config with callbacks for LangChain observability
         config = {}
         if langfuse_handler:
             config["callbacks"] = callbacks
-            # You can add metadata like user_id, session_id here
-            langfuse_handler.trace(
-                name="rag_chat_query",
-                metadata={
-                    "question": query.question,
-                    "top_k": query.top_k,
-                    "llm_model": LLM_MODEL,
-                    "embedding_model": EMBEDDING_MODEL,
-                },
-            )
+            # LangChain callback automatically tracks the chain execution
+            # No need to manually call trace() - it's handled by the callback
 
         response = retrieval_chain.invoke({"input": query.question}, config=config)
 

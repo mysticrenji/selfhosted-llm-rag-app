@@ -89,13 +89,13 @@ spec:
             - name: LANGFUSE_PUBLIC_KEY
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-public-key
+                  name: langfuse-secret
+                  key: public-key
             - name: LANGFUSE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-secret-key
+                  name: langfuse-secret
+                  key: secret-key
           resources:
             requests:
               memory: "1Gi"

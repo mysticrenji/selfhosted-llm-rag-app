@@ -231,11 +231,29 @@ The platform includes comprehensive LLM observability through Langfuse v3:
 - **Redis**: Job queue and caching layer
 - **MinIO**: Long-term event log and blob storage
 
-Access the Langfuse UI after deployment:
+**Accessing Langfuse UI:**
+
+The Langfuse service is exposed via **NodePort 30000** for direct access from your network:
+
 ```bash
-kubectl port-forward -n llm-stack svc/langfuse 3000:3000
-# Open http://localhost:3000
+# Access directly via node IP (no port-forward needed)
+# Open http://<your-node-ip>:30000
+# Example: http://192.168.1.100:30000
+
+# Or use port-forward for localhost access
+kubectl port-forward -n llm-stack svc/langfuse 30000:3000
+# Open http://localhost:30000
 ```
+
+**First-time Setup:**
+1. Open the Langfuse UI in your browser
+2. Create the first admin account
+3. Create a project for your RAG application
+4. Generate API keys (Public Key & Secret Key)
+5. Update the keys in `llm-infrastructure/manifests/001-secrets.yaml`
+6. Apply the updated secrets and restart the RAG API
+
+See [llm-infrastructure/LANGFUSE-SETUP.md](llm-infrastructure/LANGFUSE-SETUP.md) for detailed instructions.
 
 ## 📦 Components
 
@@ -246,25 +264,47 @@ kubectl port-forward -n llm-stack svc/langfuse 3000:3000
 | **ChromaDB** | Vector database | SQLite, embeddings | 8000 | Persistent storage |
 | **Meilisearch** | Keyword search engine | Rust, BM25 | 7700 | Fast indexing |
 | **RAG API** | Document Q&A backend | FastAPI, LangChain | 8080 | Async processing |
-| **Langfuse Web** | Observability dashboard | Next.js, Prisma | 3000 | UI for traces |
+| **Langfuse Web** | Observability dashboard | Next.js, Prisma | 3000 (NodePort: 30000) | UI for traces |
 | **Langfuse Worker** | Background processing | Node.js | - | Event ingestion |
 | **PostgreSQL (Langfuse)** | Metadata storage | PostgreSQL 15 | 5432 | Langfuse state |
 | **ClickHouse** | Analytics database | ClickHouse | 8123/9000 | Trace analytics |
 | **Redis** | Queue & cache | Redis 7 | 6379 | Job queue |
 | **MinIO** | S3-compatible storage | MinIO | 9000 | Blob storage |
 | **PostgreSQL (LiteLLM)** | Token tracking | PostgreSQL 15 | 5432 | Usage logs |
-| **Open WebUI** | Optional chat interface | Svelte | 3000 | Alternative UI |
+| **Open WebUI** | Optional chat interface | Svelte | 8080 | Alternative UI |
 
 ## 🚀 Quick Start
+
+### For Complete Beginners
+
+This project runs a complete AI system on your own computer (no cloud needed!). Here's what you'll do:
+
+1. **Set up the infrastructure** - Install all the AI tools and databases
+2. **Deploy the RAG app** - Upload documents and ask questions about them
+3. **Monitor with Langfuse** - See how your AI is performing
 
 ### 1. Deploy LLM Infrastructure
 
 ```bash
 cd llm-rag-app/llm-infrastructure
 
-# Configure BIOS (4-8GB UMA frame buffer for AMD GPU)
-# Install k3s and apply manifests
+# IMPORTANT: First configure your BIOS
+# - Restart your computer and enter BIOS (usually Del or F7 key)
+# - Find "Graphics Settings" or "UMA Frame Buffer"
+# - Set it to 4GB or 8GB (this gives your GPU enough memory)
+# - Save and exit
+
+# Install Kubernetes (k3s) - this manages all our services
+curl -sfL https://get.k3s.io | sh -s - --disable traefik
+
+# Wait a minute for k3s to start, then apply all configurations
+kubectl apply -f manifests/000-config.yaml
+kubectl apply -f manifests/001-secrets.yaml
 kubectl apply -f manifests/
+
+# Wait for everything to start (this may take 5-10 minutes)
+kubectl get pods -n llm-stack -w
+# Press Ctrl+C when all pods show "Running" status
 ```
 
 See [llm-infrastructure/README.md](llm-infrastructure/README.md) for detailed instructions.
@@ -274,12 +314,34 @@ See [llm-infrastructure/README.md](llm-infrastructure/README.md) for detailed in
 ```bash
 cd llm-rag-app/rag-app
 
-# Local development
+# For beginners: Test locally first (easier to debug)
+# This creates a Python virtual environment and installs dependencies
+python3 -m venv test
+source test/bin/activate
+pip install -r requirements.txt
+
+# Run the local development server
+# This script automatically connects to all the services in Kubernetes
 ./local.sh
 
-# Or deploy to Kubernetes
+# Your app is now running!
+# Open your browser to http://localhost:8080
+# - Upload a PDF document
+# - Ask questions about it
+# - Get AI-powered answers!
+
+# For production: Deploy to Kubernetes
+# Build the Docker image
 docker build -t rag-api:latest .
+
+# If using k3s, import the image
+docker save rag-api:latest | sudo k3s ctr images import -
+
+# Deploy to Kubernetes
 kubectl apply -f k8s/02-rag-api.yaml
+
+# Access via port-forward
+kubectl port-forward -n llm-stack service/rag-api 8080:8080
 ```
 
 See [rag-app/README.md](rag-app/README.md) for detailed instructions.
@@ -287,20 +349,30 @@ See [rag-app/README.md](rag-app/README.md) for detailed instructions.
 ### 3. Setup Langfuse Observability
 
 ```bash
-# Wait for all Langfuse components to be ready
-kubectl wait --for=condition=ready pod -l app=langfuse -n llm-stack --timeout=300s
-kubectl wait --for=condition=ready pod -l app=langfuse-worker -n llm-stack --timeout=300s
+# Langfuse is already deployed with NodePort access
+# Access Langfuse UI directly via your node IP
+# Example: http://192.168.1.100:30000
+# Or use localhost if on the same machine: http://localhost:30000
 
-# Access Langfuse UI
-kubectl port-forward -n llm-stack svc/langfuse 3000:3000
-# Open http://localhost:3000
+# For port-forward access (optional):
+kubectl port-forward -n llm-stack svc/langfuse 30000:3000
+# Open http://localhost:30000
 
-# Create first user account in UI
-# Create a project and generate API keys
-# Update the keys in manifests/001-secrets.yaml
+# First-time setup in the UI:
+# 1. Create your first admin account
+# 2. Create a project (e.g., "RAG Application")
+# 3. Go to Settings → API Keys
+# 4. Generate a new key pair (Public Key + Secret Key)
+# 5. Copy both keys
+
+# Update the secrets with your actual Langfuse keys
+kubectl edit secret langfuse-secret -n llm-stack
+# Update langfuse-public-key and langfuse-secret-key (base64 encoded)
+
+# Or edit manifests/001-secrets.yaml directly and reapply:
 kubectl apply -f manifests/001-secrets.yaml
 
-# Restart RAG API to use new keys
+# Restart RAG API to pick up new Langfuse keys
 kubectl rollout restart deployment/rag-api -n llm-stack
 ```
 
@@ -431,21 +503,27 @@ See LICENSE file in each component directory.
 # Check infrastructure status
 kubectl get all -n llm-stack
 
-# View logs
+# View logs (useful for debugging)
 kubectl logs -n llm-stack deployment/litellm -f
 kubectl logs -n llm-stack deployment/rag-api -f
 kubectl logs -n llm-stack deployment/langfuse -f
 kubectl logs -n llm-stack deployment/langfuse-worker -f
 
-# Test Ollama
+# Test Ollama (check which AI models are loaded)
 kubectl exec -n llm-stack pod/ollama-0 -- ollama list
 
-# Port forward for local access
+# Port forward for local access (if not using NodePort)
 kubectl port-forward -n llm-stack service/rag-api 8080:8080
-kubectl port-forward -n llm-stack service/langfuse 3000:3000
 kubectl port-forward -n llm-stack service/chromadb 8000:8000
 
-# Check Langfuse components
+# Check Langfuse is accessible (NodePort 30000)
+curl -I http://localhost:30000/api/public/health
+
+# Get your node's IP address for accessing Langfuse
+kubectl get nodes -o wide
+# Look for INTERNAL-IP column, then access: http://<INTERNAL-IP>:30000
+
+# Check Langfuse components status
 kubectl get pods -n llm-stack -l app=langfuse
 kubectl get pods -n llm-stack -l app=langfuse-worker
 kubectl get pods -n llm-stack -l app=langfuse-postgres
@@ -453,8 +531,11 @@ kubectl get pods -n llm-stack -l app=langfuse-clickhouse
 kubectl get pods -n llm-stack -l app=langfuse-redis
 kubectl get pods -n llm-stack -l app=langfuse-minio
 
-# View Langfuse trace data
-# Access http://localhost:3000 after port-forward
+# Restart a service if needed
+kubectl rollout restart deployment/<service-name> -n llm-stack
+
+# View Langfuse service details (check NodePort is 30000)
+kubectl get svc langfuse -n llm-stack -o wide
 ```
 
 ## 🌟 Acknowledgments

@@ -169,9 +169,9 @@ graph LR
 | **ClickHouse** | Langfuse Analytics DB | 8123/9000 | Trace events, OLAP | PVC |
 | **Redis** | Langfuse Queue & Cache | 6379 | Job queue, cache | In-memory |
 | **MinIO** | S3-compatible Object Storage | 9000 | Event logs, blobs | PVC |
-| **Langfuse Web** | Observability Dashboard | 3000 | Next.js UI | Stateless |
+| **Langfuse Web** | Observability Dashboard | 3000 (NodePort: 30000) | Next.js UI | Stateless |
 | **Langfuse Worker** | Background Job Processor | - | Event ingestion | Stateless |
-| **Open WebUI** | Optional Chat Interface | 3000 | Web-based UI | PVC (config) |
+| **Open WebUI** | Optional Chat Interface | 8080 | Web-based UI | PVC (config) |
 | **Cloudflare Tunnel** | Secure Remote Access | - | Zero Trust | Stateless |
 
 ---
@@ -883,14 +883,35 @@ LANGFUSE_S3_*_FORCE_PATH_STYLE: true
 ```
 
 **Access Langfuse:**
-```bash
-# Port forward to access UI
-kubectl port-forward -n llm-stack svc/langfuse 3000:3000
 
-# Open browser to http://localhost:3000
-# Create first user and project
-# Generate API keys for RAG application
+Langfuse is exposed via **NodePort 30000** for direct network access:
+
+```bash
+# Get your node's IP address
+kubectl get nodes -o wide
+# Look for the INTERNAL-IP column (e.g., 192.168.1.100)
+
+# Access Langfuse directly via NodePort (no port-forward needed!)
+# Open browser to: http://<your-node-ip>:30000
+# Example: http://192.168.1.100:30000
+
+# Or use port-forward for localhost access
+kubectl port-forward -n llm-stack svc/langfuse 30000:3000
+# Open browser to http://localhost:30000
+
+# First-time setup in the UI:
+# 1. Create your first admin account
+# 2. Create a project (e.g., "RAG Application")
+# 3. Go to Settings → API Keys
+# 4. Generate a new key pair (Public Key + Secret Key)
+# 5. Copy both keys and update your RAG application secrets
 ```
+
+**Important Notes:**
+- **Port 3000** is the internal container port
+- **Port 30000** is the NodePort exposed on your node's IP
+- The `NEXTAUTH_URL` in ConfigMap uses the internal service URL for pod-to-pod communication
+- External browser access uses `http://<node-ip>:30000`
 
 See [LANGFUSE-SETUP.md](./LANGFUSE-SETUP.md) for detailed configuration guide.
 
@@ -913,6 +934,122 @@ spec:
 
 ## 🚀 Phase 4: Installation & Init
 
+### Quick Start for Beginners
+
+If this is your first time deploying this infrastructure, follow these steps carefully:
+
+**Step 1: Prepare Your Secrets**
+```bash
+# IMPORTANT: Before applying anything, edit the secrets file
+nano manifests/001-secrets.yaml
+
+# You MUST change these values (they're just examples):
+# - postgres-password: Choose a strong password
+# - litellm-master-key: Create a random API key
+# - meilisearch-master-key: Create another random key
+# - All Langfuse secrets (see LANGFUSE-SETUP.md for how to generate them)
+
+# Save the file when done (Ctrl+X, then Y, then Enter)
+```
+
+**Step 2: Apply Configuration in Order**
+```bash
+cd ~/llm-rag-app/llm-infrastructure
+
+# Step 2.1: Create namespace and base configuration
+sudo kubectl apply -f manifests/000-config.yaml
+sudo kubectl apply -f manifests/001-secrets.yaml
+
+# Step 2.2: Deploy storage (PostgreSQL for LiteLLM)
+sudo kubectl apply -f manifests/01-setup.yaml
+
+# Wait for PostgreSQL to be ready (this may take 1-2 minutes)
+sudo kubectl wait --for=condition=ready pod -l app=postgres -n llm-stack --timeout=300s
+
+# Step 2.3: Deploy Ollama (the AI model runner)
+sudo kubectl apply -f manifests/02-ollama-amd.yaml
+
+# Wait for Ollama to be ready (may take 2-3 minutes)
+sudo kubectl wait --for=condition=ready pod -l app=ollama -n llm-stack --timeout=600s
+
+# Step 2.4: Deploy the rest of the services
+sudo kubectl apply -f manifests/03-litellm.yaml
+sudo kubectl apply -f manifests/04-openwebui.yaml
+sudo kubectl apply -f manifests/06-chromadb.yaml
+sudo kubectl apply -f manifests/07-meilisearch.yaml
+sudo kubectl apply -f manifests/08-langfuse.yaml
+
+# Optional: Deploy Cloudflare tunnel (only if you need remote access)
+# sudo kubectl apply -f manifests/05-tunnel.yaml
+```
+
+**Step 3: Check Everything is Running**
+```bash
+# This command shows all your services
+sudo kubectl get pods -n llm-stack
+
+# You should see all pods with "Running" status:
+# - ollama-0
+# - postgres-0 (for LiteLLM)
+# - litellm-xxx
+# - chromadb-xxx
+# - meilisearch-xxx
+# - langfuse-postgres-0
+# - langfuse-clickhouse-0
+# - langfuse-redis-xxx
+# - langfuse-minio-xxx
+# - langfuse-xxx
+# - langfuse-worker-xxx
+# - openwebui-xxx (optional)
+
+# If any pod shows "Pending" or "Error", wait a bit longer
+# Or check the logs: sudo kubectl logs -n llm-stack <pod-name>
+```
+
+**Step 4: Download AI Models**
+```bash
+# These commands download the actual AI models (they're large files!)
+# The first model (llama3) is about 4.7GB
+# The embedding models are smaller (about 300-700MB each)
+
+# Download the main language model
+sudo kubectl exec -it -n llm-stack statefulset/ollama -- ollama pull llama3
+
+# Download embedding models (for understanding document meaning)
+sudo kubectl exec -it -n llm-stack statefulset/ollama -- ollama pull nomic-embed-text
+sudo kubectl exec -it -n llm-stack statefulset/ollama -- ollama pull mxbai-embed-large
+
+# Verify models are downloaded
+sudo kubectl exec -it -n llm-stack statefulset/ollama -- ollama list
+```
+
+**Step 5: Set Up Langfuse (Observability)**
+```bash
+# Find your node's IP address
+sudo kubectl get nodes -o wide
+# Look for INTERNAL-IP (e.g., 192.168.1.100)
+
+# Open your browser to http://<INTERNAL-IP>:30000
+# Example: http://192.168.1.100:30000
+
+# Follow the on-screen prompts to:
+# 1. Create your admin account
+# 2. Create a project called "RAG Application"
+# 3. Generate API keys (you'll need these later)
+```
+
+**Step 6: Test Everything Works**
+```bash
+# Test if Ollama can respond
+sudo kubectl exec -n llm-stack statefulset/ollama -- \
+  curl -s http://localhost:11434/api/generate \
+  -d '{"model":"llama3","prompt":"Say hello!","stream":false}'
+
+# If you see a JSON response with text, it works!
+```
+
+### Detailed Installation Steps (Advanced Users)
+
 1.  **Apply Manifests:**
 
     ```bash
@@ -927,6 +1064,7 @@ spec:
     sudo kubectl apply -f manifests/05-tunnel.yaml
     sudo kubectl apply -f manifests/06-chromadb.yaml
     sudo kubectl apply -f manifests/07-meilisearch.yaml
+    sudo kubectl apply -f manifests/08-langfuse.yaml
     ```
 
 2.  **Pull Models:**

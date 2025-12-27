@@ -41,8 +41,8 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-postgres-password
+                  name: langfuse-secret
+                  key: postgres-password
             - name: POSTGRES_DB
               valueFrom:
                 configMapKeyRef:
@@ -123,8 +123,8 @@ spec:
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-clickhouse-password
+                  name: langfuse-secret
+                  key: clickhouse-password
           volumeMounts:
             - name: storage
               mountPath: /var/lib/clickhouse
@@ -242,12 +242,12 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-user
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-password
           volumeMounts:
             - name: storage
@@ -303,12 +303,12 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-user
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-password
           command:
             - sh
@@ -377,11 +377,15 @@ spec:
           ports:
             - containerPort: 3000
           env:
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3000"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-database-url
+                  name: langfuse-secret
+                  key: database-url
             - name: NEXTAUTH_URL
               valueFrom:
                 configMapKeyRef:
@@ -390,28 +394,28 @@ spec:
             - name: NEXTAUTH_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-nextauth-secret
+                  name: langfuse-secret
+                  key: nextauth-secret
             - name: SALT
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-salt
+                  name: langfuse-secret
+                  key: salt
             - name: ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-encryption-key
+                  name: langfuse-secret
+                  key: encryption-key
             - name: CLICKHOUSE_URL
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-clickhouse-url
+                  name: langfuse-secret
+                  key: clickhouse-url
             - name: CLICKHOUSE_MIGRATION_URL
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-clickhouse-migration-url
+                  name: langfuse-secret
+                  key: clickhouse-migration-url
             - name: CLICKHOUSE_USER
               valueFrom:
                 configMapKeyRef:
@@ -420,8 +424,8 @@ spec:
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-clickhouse-password
+                  name: langfuse-secret
+                  key: clickhouse-password
             - name: CLICKHOUSE_DB
               value: "default"
             - name: CLICKHOUSE_CLUSTER_ENABLED
@@ -449,12 +453,12 @@ spec:
             - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-user
             - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-password
             - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
               valueFrom:
@@ -479,12 +483,12 @@ spec:
             - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-user
             - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-password
             - name: LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE
               valueFrom:
@@ -525,7 +529,8 @@ spec:
     - protocol: TCP
       port: 3000
       targetPort: 3000
-  type: ClusterIP
+      nodePort: 30000
+  type: NodePort
 
 ---
 # Langfuse Worker (required)
@@ -586,8 +591,8 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-database-url
+                  name: langfuse-secret
+                  key: database-url
             - name: NEXTAUTH_URL
               valueFrom:
                 configMapKeyRef:
@@ -596,23 +601,23 @@ spec:
             - name: SALT
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-salt
+                  name: langfuse-secret
+                  key: salt
             - name: ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-encryption-key
+                  name: langfuse-secret
+                  key: encryption-key
             - name: CLICKHOUSE_URL
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-clickhouse-url
+                  name: langfuse-secret
+                  key: clickhouse-url
             - name: CLICKHOUSE_MIGRATION_URL
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-clickhouse-migration-url
+                  name: langfuse-secret
+                  key: clickhouse-migration-url
             - name: CLICKHOUSE_USER
               valueFrom:
                 configMapKeyRef:
@@ -621,8 +626,8 @@ spec:
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
-                  key: langfuse-clickhouse-password
+                  name: langfuse-secret
+                  key: clickhouse-password
             - name: CLICKHOUSE_DB
               value: "default"
             - name: CLICKHOUSE_CLUSTER_ENABLED
@@ -650,12 +655,12 @@ spec:
             - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-user
             - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-password
             - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
               valueFrom:
@@ -680,12 +685,12 @@ spec:
             - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-user
             - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: llm-stack-secret
+                  name: langfuse-secret
                   key: minio-root-password
             - name: LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE
               valueFrom:
