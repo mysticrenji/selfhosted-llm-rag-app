@@ -1,0 +1,706 @@
+---
+# PostgreSQL for Langfuse
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-postgres-storage
+  namespace: llm-stack
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: langfuse-postgres
+  namespace: llm-stack
+spec:
+  serviceName: "langfuse-postgres"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-postgres
+  template:
+    metadata:
+      labels:
+        app: langfuse-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-postgres-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: postgres-password
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-postgres-db
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: storage
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: langfuse-postgres-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-postgres
+  namespace: llm-stack
+spec:
+  selector:
+    app: langfuse-postgres
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP
+---
+# ClickHouse for Langfuse
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-clickhouse-storage
+  namespace: llm-stack
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: langfuse-clickhouse
+  namespace: llm-stack
+spec:
+  serviceName: "langfuse-clickhouse"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-clickhouse
+  template:
+    metadata:
+      labels:
+        app: langfuse-clickhouse
+    spec:
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:24.1-alpine
+          ports:
+            - containerPort: 8123
+              name: http
+            - containerPort: 9000
+              name: native
+          env:
+            - name: CLICKHOUSE_DB
+              value: "default"
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: clickhouse-password
+          volumeMounts:
+            - name: storage
+              mountPath: /var/lib/clickhouse
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: langfuse-clickhouse-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-clickhouse
+  namespace: llm-stack
+spec:
+  selector:
+    app: langfuse-clickhouse
+  ports:
+    - protocol: TCP
+      port: 8123
+      targetPort: 8123
+      name: http
+    - protocol: TCP
+      port: 9000
+      targetPort: 9000
+      name: native
+  type: ClusterIP
+---
+# Redis for Langfuse (required)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-redis
+  namespace: llm-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-redis
+  template:
+    metadata:
+      labels:
+        app: langfuse-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-redis
+  namespace: llm-stack
+spec:
+  selector:
+    app: langfuse-redis
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379
+  type: ClusterIP
+---
+# MinIO (S3-compatible) for Langfuse (required)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-minio-storage
+  namespace: llm-stack
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-minio
+  namespace: llm-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-minio
+  template:
+    metadata:
+      labels:
+        app: langfuse-minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args: ["server", "/data", "--console-address", ":9001"]
+          ports:
+            - containerPort: 9000
+              name: s3
+            - containerPort: 9001
+              name: console
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-password
+          volumeMounts:
+            - name: storage
+              mountPath: /data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: langfuse-minio-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-minio
+  namespace: llm-stack
+spec:
+  selector:
+    app: langfuse-minio
+  ports:
+    - protocol: TCP
+      port: 9000
+      targetPort: 9000
+      name: s3
+    - protocol: TCP
+      port: 9001
+      targetPort: 9001
+      name: console
+  type: ClusterIP
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: langfuse-minio-init
+  namespace: llm-stack
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: langfuse-minio-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-password
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              until mc alias set lf http://langfuse-minio.llm-stack.svc.cluster.local:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                echo "waiting for minio"; sleep 2;
+              done
+              mc mb -p lf/langfuse-events || true
+              mc mb -p lf/langfuse-media || true
+              echo "minio buckets ensured"
+---
+# Langfuse Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse
+  namespace: llm-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse
+  template:
+    metadata:
+      labels:
+        app: langfuse
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:latest
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z langfuse-postgres.llm-stack.svc.cluster.local 5432; do echo waiting for postgres; sleep 2; done;",
+            ]
+        - name: wait-for-clickhouse
+          image: busybox:latest
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z langfuse-clickhouse.llm-stack.svc.cluster.local 8123; do echo waiting for clickhouse; sleep 2; done;",
+            ]
+        - name: wait-for-redis
+          image: busybox:latest
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z langfuse-redis.llm-stack.svc.cluster.local 6379; do echo waiting for redis; sleep 2; done;",
+            ]
+        - name: wait-for-minio
+          image: busybox:latest
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z langfuse-minio.llm-stack.svc.cluster.local 9000; do echo waiting for minio; sleep 2; done;",
+            ]
+      containers:
+        - name: langfuse
+          image: langfuse/langfuse:3
+          ports:
+            - containerPort: 3000
+          env:
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3000"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: database-url
+            - name: NEXTAUTH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-nextauth-url
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: nextauth-secret
+            - name: SALT
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: salt
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: encryption-key
+            - name: CLICKHOUSE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: clickhouse-url
+            - name: CLICKHOUSE_MIGRATION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: clickhouse-migration-url
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-clickhouse-user
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: clickhouse-password
+            - name: CLICKHOUSE_DB
+              value: "default"
+            - name: CLICKHOUSE_CLUSTER_ENABLED
+              value: "false"
+            - name: REDIS_CONNECTION_STRING
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-redis-connection-string
+            - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-event-bucket
+            - name: LANGFUSE_S3_EVENT_UPLOAD_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-region
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-endpoint
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-user
+            - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-password
+            - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-force-path-style
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-media-bucket
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-region
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-endpoint
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-user
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-password
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-force-path-style
+            - name: TELEMETRY_ENABLED
+              value: "false"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /api/public/health
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/public/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse
+  namespace: llm-stack
+spec:
+  selector:
+    app: langfuse
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+      nodePort: 30000
+  type: NodePort
+
+---
+# Langfuse Worker (required)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-worker
+  namespace: llm-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-worker
+  template:
+    metadata:
+      labels:
+        app: langfuse-worker
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:latest
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z langfuse-postgres.llm-stack.svc.cluster.local 5432; do echo waiting for postgres; sleep 2; done;",
+            ]
+        - name: wait-for-clickhouse
+          image: busybox:latest
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z langfuse-clickhouse.llm-stack.svc.cluster.local 8123; do echo waiting for clickhouse; sleep 2; done;",
+            ]
+        - name: wait-for-redis
+          image: busybox:latest
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z langfuse-redis.llm-stack.svc.cluster.local 6379; do echo waiting for redis; sleep 2; done;",
+            ]
+        - name: wait-for-minio
+          image: busybox:latest
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z langfuse-minio.llm-stack.svc.cluster.local 9000; do echo waiting for minio; sleep 2; done;",
+            ]
+      containers:
+        - name: langfuse-worker
+          image: langfuse/langfuse-worker:3
+          ports:
+            - containerPort: 3030
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: database-url
+            - name: NEXTAUTH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-nextauth-url
+            - name: SALT
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: salt
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: encryption-key
+            - name: CLICKHOUSE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: clickhouse-url
+            - name: CLICKHOUSE_MIGRATION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: clickhouse-migration-url
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-clickhouse-user
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: clickhouse-password
+            - name: CLICKHOUSE_DB
+              value: "default"
+            - name: CLICKHOUSE_CLUSTER_ENABLED
+              value: "false"
+            - name: REDIS_CONNECTION_STRING
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-redis-connection-string
+            - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-event-bucket
+            - name: LANGFUSE_S3_EVENT_UPLOAD_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-region
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-endpoint
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-user
+            - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-password
+            - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-force-path-style
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-media-bucket
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-region
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-endpoint
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-user
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: minio-root-password
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE
+              valueFrom:
+                configMapKeyRef:
+                  name: llm-stack-config
+                  key: langfuse-s3-force-path-style
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"

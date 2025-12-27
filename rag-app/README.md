@@ -112,6 +112,128 @@ kubectl get pods -n llm-stack
 
 ## 🚀 Quick Start
 
+### For Complete Beginners
+
+**What does this application do?**
+
+This is a "RAG" (Retrieval-Augmented Generation) application. In simple terms:
+1. You upload PDF documents
+2. The app reads and understands them using AI
+3. You ask questions about those documents
+4. The AI finds relevant information and gives you intelligent answers
+
+It's like having a smart assistant that has read all your documents and can answer questions about them!
+
+**Prerequisites:**
+
+Before starting, make sure you've completed the [LLM Infrastructure Setup](../llm-infrastructure/README.md). You need:
+- ✅ Kubernetes cluster running (k3s)
+- ✅ Ollama with models downloaded (llama3, mxbai-embed-large)
+- ✅ LiteLLM, ChromaDB, and Meilisearch services running
+- ✅ Langfuse set up for monitoring
+
+Check everything is running:
+```bash
+kubectl get pods -n llm-stack
+# All pods should show "Running" status
+```
+
+### Option 1: Local Development (Recommended for Testing)
+
+This runs the app on your local machine while connecting to services in Kubernetes.
+
+**1. Clone and Setup Python Environment**
+```bash
+cd rag-app
+
+# Create a virtual environment (isolated Python installation)
+python3 -m venv test
+
+# Activate it (like switching to this Python environment)
+source test/bin/activate
+
+# Install all the required Python libraries
+# This may take 5-10 minutes depending on your internet speed
+pip install -r requirements.txt
+```
+
+**2. Run the Development Server**
+```bash
+# This script does everything automatically:
+# - Connects to your Kubernetes services
+# - Sets up port forwarding
+# - Starts the application
+./local.sh
+
+# You should see output like:
+# 🚀 Starting RAG Application in Local Development Mode
+# ...
+# ✅ Port-forwards established!
+# ...
+# Uvicorn running on http://0.0.0.0:8080
+```
+
+**3. Use the Application**
+
+Open your web browser and go to: **http://localhost:8080**
+
+You'll see a simple interface where you can:
+- **Upload a PDF** - Click "Choose File" and select a PDF document
+- **Ask Questions** - Type a question about the document
+- **Get AI Answers** - The AI will read the document and answer your question
+
+**4. Monitor with Langfuse**
+
+While using the app, you can see what's happening behind the scenes:
+```bash
+# Get your node's IP
+kubectl get nodes -o wide
+
+# Open Langfuse in your browser
+# http://<your-node-ip>:30000
+# Example: http://192.168.1.100:30000
+```
+
+In Langfuse, you'll see:
+- Every question you ask
+- How the AI found relevant information
+- How many "tokens" (words) were processed
+- How long each step took
+
+**5. Stop the Application**
+
+Press `Ctrl+C` in the terminal where `local.sh` is running.
+
+### Option 2: Kubernetes Deployment (Production)
+
+This deploys the app permanently in Kubernetes (recommended for real use).
+
+**1. Build the Container Image**
+```bash
+# This creates a Docker image with your app
+docker build -t rag-api:latest .
+
+# If using k3s, import it so Kubernetes can use it
+docker save rag-api:latest | sudo k3s ctr images import -
+```
+
+**2. Deploy to Kubernetes**
+```bash
+kubectl apply -f k8s/02-rag-api.yaml
+
+# Wait for it to start
+kubectl wait --for=condition=ready pod -l app=rag-api -n llm-stack --timeout=300s
+```
+
+**3. Access the Application**
+```bash
+# Connect to it from your local machine
+kubectl port-forward -n llm-stack service/rag-api 8080:8080
+
+# Or access it directly if on the same machine:
+# http://localhost:8080
+```
+
 ### Option 1: Local Development (Recommended for Testing)
 
 **1. Clone and Setup**
@@ -217,15 +339,27 @@ curl -X DELETE "http://localhost:8080/documents/document.pdf"
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CHROMA_HOST` | `chromadb.llm-stack.svc.cluster.local` | ChromaDB hostname |
+| `CHROMA_HOST` | `chromadb.llm-stack.svc.cluster.local` | ChromaDB hostname (vector database for semantic search) |
 | `CHROMA_PORT` | `8000` | ChromaDB port |
-| `MEILI_HOST` | `http://meilisearch.llm-stack.svc.cluster.local:7700` | Meilisearch URL |
-| `MEILI_MASTER_KEY` | `masterKey` | Meilisearch authentication |
-| `LLM_API_BASE` | `http://litellm.llm-stack.svc.cluster.local:4000` | LiteLLM proxy URL |
-| `LLM_API_KEY` | `sk-admin-secret-key` | LiteLLM API key |
-| `EMBEDDING_MODEL` | `mxbai-embed-large` | Model for embeddings |
-| `LLM_MODEL` | `llama3` | Model for generation |
-| `MAX_FILE_SIZE` | `52428800` | Max upload size (50MB) |
+| `MEILI_HOST` | `http://meilisearch.llm-stack.svc.cluster.local:7700` | Meilisearch URL (keyword search engine) |
+| `MEILI_MASTER_KEY` | `masterKey` | Meilisearch authentication key |
+| `LLM_API_BASE` | `http://litellm.llm-stack.svc.cluster.local:4000` | LiteLLM proxy URL (connects to Ollama) |
+| `LLM_API_KEY` | `sk-admin-secret-key` | LiteLLM API key (from secrets) |
+| `EMBEDDING_MODEL` | `mxbai-embed-large` | Model for converting text to vectors (embeddings) |
+| `LLM_MODEL` | `llama3` | Model for generating answers |
+| `MAX_FILE_SIZE` | `52428800` | Max upload size in bytes (50MB default) |
+| `LANGFUSE_HOST` | `http://localhost:30000` | Langfuse server URL (for monitoring) |
+| `LANGFUSE_PUBLIC_KEY` | (from secrets) | Langfuse project public key |
+| `LANGFUSE_SECRET_KEY` | (from secrets) | Langfuse project secret key |
+| `LANGFUSE_ENABLED` | `true` | Enable/disable Langfuse tracing |
+
+**For Beginners:**
+- **ChromaDB** stores the "meaning" of text as numbers (vectors)
+- **Meilisearch** does traditional keyword search (like Ctrl+F)
+- **LiteLLM** is the "middleman" that talks to Ollama
+- **Embedding Model** converts your documents into numbers the AI can understand
+- **LLM Model** is the AI that reads and answers questions
+- **Langfuse** records everything that happens so you can see how the AI works
 
 ### Model Configuration
 
@@ -251,7 +385,80 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 ## 🔧 Troubleshooting
 
-### Common Issues
+### Common Issues for Beginners
+
+**1. "Cannot connect to ChromaDB/Meilisearch"**
+
+**Problem:** The app can't reach the database services.
+
+**Solution:**
+```bash
+# Check if services are running
+kubectl get pods -n llm-stack
+
+# If using local.sh, make sure port-forwards are active
+ps aux | grep port-forward
+
+# Restart local.sh if needed
+./local.sh
+```
+
+**2. "Port 8080 already in use"**
+
+**Problem:** Something else is using port 8080.
+
+**Solution:**
+```bash
+# Find what's using the port
+sudo lsof -i :8080
+
+# Stop the other process, or change the port in local.sh to 8081
+```
+
+**3. "File too large" when uploading**
+
+**Problem:** Your PDF is bigger than 50MB.
+
+**Solution:**
+- Split your PDF into smaller files
+- Or increase MAX_FILE_SIZE in the environment variables
+
+**4. "Embedding failed: Model not found"**
+
+**Problem:** The embedding model isn't downloaded in Ollama.
+
+**Solution:**
+```bash
+# Check which models are available
+kubectl exec -n llm-stack statefulset/ollama -- ollama list
+
+# Pull the missing model
+kubectl exec -n llm-stack statefulset/ollama -- ollama pull mxbai-embed-large
+
+# Restart LiteLLM to detect it
+kubectl rollout restart -n llm-stack deployment/litellm
+```
+
+**5. "Connection error" when asking questions**
+
+**Problem:** The AI model (Ollama) isn't responding.
+
+**Solution:**
+```bash
+# Check if Ollama is running
+kubectl get pods -n llm-stack -l app=ollama
+
+# Check Ollama logs for errors
+kubectl logs -n llm-stack statefulset/ollama
+
+# Check if LiteLLM port-forward is active (for local dev)
+ps aux | grep "port-forward.*litellm"
+
+# Restart local.sh if port-forwards died
+./local.sh
+```
+
+### Common Issues (Technical Users)
 
 **1. "Embedding failed: 400 Bad Request"**
 - **Cause**: Model not configured in LiteLLM or Ollama
@@ -290,8 +497,25 @@ text_splitter = RecursiveCharacterTextSplitter(
 pkill -f "port-forward.*chromadb"
 pkill -f "port-forward.*meilisearch"
 pkill -f "port-forward.*litellm"
+pkill -f "port-forward.*langfuse"
 
 # Or just run ./local.sh which handles this
+```
+
+**6. Langfuse traces not appearing**
+```bash
+# Check Langfuse is running
+kubectl get pods -n llm-stack -l app=langfuse
+
+# Verify LANGFUSE_ENABLED is set to true
+echo $LANGFUSE_ENABLED
+
+# Check if port-forward to Langfuse is active (for local dev)
+# Should map localhost:30000 -> langfuse:3000
+ps aux | grep "port-forward.*langfuse"
+
+# Access Langfuse UI to verify it's working
+# http://<node-ip>:30000 or http://localhost:30000
 ```
 
 ### Debug Mode

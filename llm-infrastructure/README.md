@@ -4,61 +4,138 @@ A production-ready, self-hosted LLM platform running on **Kubernetes (k3s)** wit
 
 ## 🏗️ Architecture Diagram
 
+### Complete Infrastructure Overview
+
 ```mermaid
 graph TB
-    subgraph "External Access"
+    subgraph "External Access Layer"
         User[👤 Users/Clients]
         Browser[🌐 Web Browser]
+        RAGUI[RAG Application UI]
     end
 
-    subgraph "Cloudflare"
-        CFTunnel[🔒 Cloudflare Tunnel<br/>Zero Trust Gateway]
+    subgraph "Cloudflare Edge"
+        CFTunnel[🔒 Cloudflare Tunnel<br/>Zero Trust Gateway<br/>---<br/>• Service Token Auth<br/>• TLS Termination]
     end
 
-    subgraph "Kubernetes Cluster (k3s)"
-        subgraph "Frontend Layer"
-            OpenWebUI[🖥️ Open WebUI<br/>Port 3000<br/>Chat Interface]
+    subgraph "Kubernetes Cluster - llm-stack namespace"
+
+        subgraph "Application Layer"
+            RAGAPI[RAG API<br/>Port 8080<br/>FastAPI Backend<br/>---<br/>• PDF Ingestion<br/>• Query Processing<br/>• Langfuse Callbacks]
+            OpenWebUI[🖥️ Open WebUI<br/>Port 3000<br/>---<br/>Chat Interface<br/>Alternative UI]
         end
 
-        subgraph "API Layer"
-            LiteLLM[🔀 LiteLLM Proxy<br/>Port 4000<br/>OpenAI-Compatible API]
+        subgraph "API Gateway Layer"
+            LiteLLM[🔀 LiteLLM Proxy<br/>Port 4000<br/>---<br/>• OpenAI-Compatible API<br/>• Request Routing<br/>• Token Tracking<br/>• Rate Limiting]
         end
 
-        subgraph "LLM Runtime"
-            Ollama[🤖 Ollama<br/>Port 11434<br/>ROCm Optimized<br/>AMD GPU Accelerated]
+        subgraph "LLM Runtime Layer"
+            Ollama[🤖 Ollama<br/>Port 11434<br/>---<br/>ROCm Optimized<br/>AMD GPU Accelerated<br/>---<br/>Loaded Models:<br/>• llama3<br/>• mxbai-embed-large<br/>• nomic-embed-text]
         end
 
-        subgraph "Storage Layer"
-            ChromaDB[(🧠 ChromaDB<br/>Port 8000<br/>Vector Database<br/>Embeddings)]
-            Meilisearch[(🔍 Meilisearch<br/>Port 7700<br/>Search Engine<br/>BM25/Lexical)]
-            PostgreSQL[(📊 PostgreSQL<br/>Port 5432<br/>Usage Tracking<br/>Token Logs)]
+        subgraph "RAG Storage Layer"
+            ChromaDB[(🧠 ChromaDB<br/>Port 8000<br/>---<br/>Vector Database<br/>• Embeddings Storage<br/>• Cosine Similarity<br/>• 1024-dim vectors)]
+            Meilisearch[(🔍 Meilisearch<br/>Port 7700<br/>---<br/>Search Engine<br/>• BM25 Ranking<br/>• Keyword Search<br/>• Fast Indexing)]
+        end
+
+        subgraph "Observability Platform - Langfuse v3"
+            LangfuseWeb[Langfuse Web UI<br/>Port 3000<br/>---<br/>• Trace Dashboard<br/>• Cost Analytics<br/>• Session Management<br/>• Prompt Versioning]
+            LangfuseWorker[Langfuse Worker<br/>---<br/>• Background Jobs<br/>• Event Ingestion<br/>• Data Migrations<br/>• Batch Processing]
+        end
+
+        subgraph "Langfuse Data Layer"
+            LFPostgres[(PostgreSQL<br/>Port 5432<br/>---<br/>Metadata Store<br/>• User Accounts<br/>• Projects/API Keys<br/>• Prisma Schema)]
+            LFClickHouse[(ClickHouse<br/>Ports 8123/9000<br/>---<br/>Analytics OLAP DB<br/>• Trace Events<br/>• Fast Queries<br/>• Time-series Data)]
+            LFRedis[(Redis<br/>Port 6379<br/>---<br/>Queue & Cache<br/>• Job Queue<br/>• Session Cache<br/>• Rate Limits)]
+            LFMinIO[(MinIO S3<br/>Port 9000<br/>---<br/>Blob Storage<br/>• Event Logs<br/>• Media Files<br/>• Exports)]
+        end
+
+        subgraph "Supporting Storage"
+            LiteLLMDB[(PostgreSQL<br/>Port 5432<br/>---<br/>LiteLLM Logs<br/>Token Usage)]
         end
 
         subgraph "Hardware Layer"
-            GPU[🎮 AMD Radeon 780M iGPU<br/>ROCm Backend<br/>4-8GB VRAM]
+            GPU[🎮 AMD Radeon 780M iGPU<br/>ROCm Backend<br/>4-8GB VRAM<br/>---<br/>• FP16 Inference<br/>• Parallel Embedding]
         end
     end
 
-    User -->|API Requests<br/>+Service Token| CFTunnel
-    Browser -->|HTTPS<br/>+Service Token| CFTunnel
+    %% External Access
+    User -->|API Requests| CFTunnel
+    Browser -->|HTTPS + Token| CFTunnel
+    RAGUI -->|Document Upload/Query| RAGAPI
     CFTunnel -->|Secure Tunnel| LiteLLM
     CFTunnel -.->|Optional| OpenWebUI
+    CFTunnel -.->|Optional| LangfuseWeb
 
+    %% Application Layer
+    RAGAPI -->|Ingestion & Query| LiteLLM
     OpenWebUI -->|Chat Requests| LiteLLM
-    LiteLLM -->|Model Inference| Ollama
-    LiteLLM -->|Log Usage| PostgreSQL
 
+    %% LLM Layer
+    LiteLLM -->|Model Inference| Ollama
+    LiteLLM -->|Log Token Usage| LiteLLMDB
     Ollama -->|GPU Compute| GPU
+
+    %% RAG Storage
+    RAGAPI -->|Store/Query Vectors| ChromaDB
+    RAGAPI -->|Index/Search Text| Meilisearch
     Ollama -.->|Embeddings| ChromaDB
 
-    LiteLLM -.->|Vector Search| ChromaDB
-    LiteLLM -.->|Keyword Search| Meilisearch
+    %% Langfuse Observability
+    RAGAPI -.->|Send Traces<br/>LangChain Callbacks| LangfuseWeb
+    LangfuseWeb -->|Store Metadata<br/>Users, Projects| LFPostgres
+    LangfuseWeb -->|Queue Events<br/>Async Jobs| LFRedis
+    LangfuseWorker -->|Poll Jobs<br/>Background Tasks| LFRedis
+    LangfuseWorker -->|Write Analytics<br/>Trace Data| LFClickHouse
+    LangfuseWorker -->|Store Blobs<br/>Event Logs| LFMinIO
+    LangfuseWeb -->|Read Analytics<br/>Dashboard Queries| LFClickHouse
 
+    %% Styling
     style CFTunnel fill:#f96,stroke:#333,stroke-width:2px
     style LiteLLM fill:#85e085,stroke:#333,stroke-width:2px
     style Ollama fill:#ffa500,stroke:#333,stroke-width:2px
     style GPU fill:#ff6b6b,stroke:#333,stroke-width:3px
-    style OpenWebUI fill:#4ecdc4,stroke:#333,stroke-width:2px
+    style RAGAPI fill:#4ecdc4,stroke:#333,stroke-width:2px
+    style LangfuseWeb fill:#fff176,stroke:#333,stroke-width:2px
+    style LangfuseWorker fill:#fff59d,stroke:#333,stroke-width:2px
+```
+
+### Langfuse Observability Architecture (Detailed)
+
+```mermaid
+graph LR
+    subgraph "RAG Application"
+        RAGCode[RAG API Code<br/>---<br/>• LangChain Integration<br/>• CallbackHandler<br/>• Trace Context]
+    end
+
+    subgraph "Langfuse Components"
+        WebUI[Langfuse Web<br/>Port 3000<br/>---<br/>Next.js App<br/>REST API]
+        Worker[Langfuse Worker<br/>---<br/>Background Service<br/>Event Processor]
+    end
+
+    subgraph "Data Storage"
+        PG[(PostgreSQL<br/>Relational DB<br/>---<br/>Users, Projects<br/>API Keys, Settings)]
+        CH[(ClickHouse<br/>OLAP DB<br/>---<br/>Traces, Spans<br/>Observations, Scores)]
+        R[(Redis<br/>In-Memory<br/>---<br/>Job Queue<br/>Cache Layer)]
+        S3[(MinIO S3<br/>Object Store<br/>---<br/>Event Logs<br/>Media/Exports)]
+    end
+
+    RAGCode -->|1. Send Trace Events<br/>HTTP POST| WebUI
+    WebUI -->|2. Save Metadata| PG
+    WebUI -->|3. Queue Event| R
+    Worker -->|4. Poll Queue| R
+    Worker -->|5. Write Analytics| CH
+    Worker -->|6. Store Blobs| S3
+    WebUI -->|7. Query Dashboard| CH
+    WebUI -->|8. Read Config| PG
+
+    style RAGCode fill:#e3f2fd
+    style WebUI fill:#fff9c4
+    style Worker fill:#fff59d
+    style PG fill:#c8e6c9
+    style CH fill:#b2dfdb
+    style R fill:#ffccbc
+    style S3 fill:#d1c4e9
 ```
 
 ## 📑 Table of Contents
@@ -81,15 +158,21 @@ graph TB
 
 ### Components
 
-| Component | Purpose | Port | Technology |
-|-----------|---------|------|------------|
-| **Ollama** | LLM & Embedding Model Runtime | 11434 | AMD ROCm optimized |
-| **LiteLLM** | OpenAI-compatible API Proxy | 4000 | Routes to Ollama |
-| **ChromaDB** | Vector Database | 8000 | Stores embeddings |
-| **Meilisearch** | Keyword Search Engine | 7700 | BM25/lexical search |
-| **PostgreSQL** | LiteLLM Usage Tracking | 5432 | Token logging |
-| **Open WebUI** | Optional Chat Interface | 3000 | Web-based UI |
-| **Cloudflare Tunnel** | Secure Remote Access | - | Zero Trust |
+| Component | Purpose | Port | Technology | Storage |
+|-----------|---------|------|------------|---------|
+| **Ollama** | LLM & Embedding Model Runtime | 11434 | AMD ROCm optimized | Models in PVC |
+| **LiteLLM** | OpenAI-compatible API Proxy | 4000 | Routes to Ollama | Stateless |
+| **ChromaDB** | Vector Database | 8000 | Stores embeddings | PVC (SQLite) |
+| **Meilisearch** | Keyword Search Engine | 7700 | BM25/lexical search | PVC |
+| **PostgreSQL (LiteLLM)** | LiteLLM Usage Tracking | 5432 | Token logging | PVC |
+| **PostgreSQL (Langfuse)** | Langfuse Metadata Store | 5432 | Users, Projects, Keys | PVC |
+| **ClickHouse** | Langfuse Analytics DB | 8123/9000 | Trace events, OLAP | PVC |
+| **Redis** | Langfuse Queue & Cache | 6379 | Job queue, cache | In-memory |
+| **MinIO** | S3-compatible Object Storage | 9000 | Event logs, blobs | PVC |
+| **Langfuse Web** | Observability Dashboard | 3000 (NodePort: 30000) | Next.js UI | Stateless |
+| **Langfuse Worker** | Background Job Processor | - | Event ingestion | Stateless |
+| **Open WebUI** | Optional Chat Interface | 8080 | Web-based UI | PVC (config) |
+| **Cloudflare Tunnel** | Secure Remote Access | - | Zero Trust | Stateless |
 
 ---
 
@@ -124,6 +207,53 @@ graph TB
 ## ⚙️ Phase 1: Hardware & OS Configuration (CRITICAL)
 
 **⚠️ Do not skip this section.** Standard Docker setups will fail to detect the Radeon iGPU without these steps.
+
+### Deployment Flow Overview
+
+```mermaid
+flowchart TD
+    Start([🚀 Start Deployment]) --> BIOS[Configure BIOS<br/>---<br/>Set UMA Frame Buffer<br/>4GB or 8GB VRAM]
+
+    BIOS --> OS[OS Setup<br/>---<br/>Ubuntu Server<br/>User Permissions<br/>video/render groups]
+
+    OS --> K3s[Install k3s<br/>---<br/>Disable Traefik<br/>Configure kubectl]
+
+    K3s --> ConfigSecrets[Apply Config & Secrets<br/>---<br/>000-config.yaml<br/>001-secrets.yaml]
+
+    ConfigSecrets --> Setup[Deploy Core Setup<br/>---<br/>01-setup.yaml<br/>Namespaces & PVCs]
+
+    Setup --> Ollama[Deploy Ollama<br/>---<br/>02-ollama-amd.yaml<br/>GPU-enabled StatefulSet]
+
+    Ollama --> WaitOllama{Ollama<br/>Ready?}
+    WaitOllama -->|No| WaitOllama
+    WaitOllama -->|Yes| Models[Pull Models<br/>---<br/>llama3<br/>mxbai-embed-large<br/>nomic-embed-text]
+
+    Models --> Storage[Deploy Storage<br/>---<br/>ChromaDB<br/>Meilisearch]
+
+    Storage --> LiteLLM[Deploy LiteLLM<br/>---<br/>03-litellm.yaml<br/>With Postgres]
+
+    LiteLLM --> Langfuse[Deploy Langfuse<br/>---<br/>08-langfuse.yaml<br/>Web + Worker + DBs]
+
+    Langfuse --> Optional[Deploy Optional<br/>---<br/>Open WebUI<br/>Cloudflare Tunnel]
+
+    Optional --> Verify[Verification<br/>---<br/>Check all pods<br/>Test endpoints<br/>View Langfuse UI]
+
+    Verify --> Complete([✅ Deployment Complete])
+
+    style BIOS fill:#ffcdd2
+    style OS fill:#f8bbd0
+    style K3s fill:#e1bee7
+    style ConfigSecrets fill:#d1c4e9
+    style Setup fill:#c5cae9
+    style Ollama fill:#bbdefb
+    style Models fill:#b3e5fc
+    style Storage fill:#b2ebf2
+    style LiteLLM fill:#b2dfdb
+    style Langfuse fill:#c8e6c9
+    style Optional fill:#dcedc8
+    style Verify fill:#f0f4c3
+    style Complete fill:#aed581
+```
 
 ### 1\. BIOS Settings
 
@@ -668,6 +798,124 @@ spec:
         persistentVolumeClaim:
           claimName: meilisearch-storage
 ---
+```
+
+### 8\. [`manifests/08-langfuse.yaml`](./manifests/08-langfuse.yaml) (LLM Observability)
+*Langfuse v3 for comprehensive LLM tracing, analytics, and cost tracking.*
+
+**Architecture:**
+```mermaid
+graph LR
+    subgraph "Langfuse v3 Platform"
+        Web[Langfuse Web UI<br/>Next.js App]
+        Worker[Langfuse Worker<br/>Background Jobs]
+
+        PG[(PostgreSQL<br/>Metadata)]
+        CH[(ClickHouse<br/>Analytics)]
+        Redis[(Redis<br/>Queue)]
+        S3[(MinIO S3<br/>Blobs)]
+    end
+
+    RAG[RAG Application] -->|Traces| Web
+    Web --> PG
+    Web --> Redis
+    Worker --> Redis
+    Worker --> CH
+    Worker --> S3
+
+    style Web fill:#fff176
+    style Worker fill:#fff59d
+```
+
+**Components Deployed:**
+- **Langfuse Web** (Port 3000): Dashboard UI, REST API, user management
+- **Langfuse Worker**: Background event ingestion, migrations, analytics processing
+- **PostgreSQL**: Stores users, projects, API keys, configuration (Prisma schema)
+- **ClickHouse**: High-performance OLAP database for trace events and analytics queries
+- **Redis**: Job queue for async processing and session caching
+- **MinIO**: S3-compatible storage for event logs, media files, and exports
+
+**Key Features:**
+- 📊 Real-time trace visualization with span-level details
+- 💰 Token counting and cost tracking per model
+- 📈 Analytics dashboards for usage trends
+- 🔍 Session grouping and user tracking
+- ⭐ Quality scoring and feedback
+- 📝 Prompt version management
+- 🔄 A/B testing support
+
+**Required Environment Variables:**
+```yaml
+# Core
+DATABASE_URL: postgresql://...
+NEXTAUTH_URL: http://langfuse.llm-stack.svc.cluster.local:3000
+NEXTAUTH_SECRET: <random-secret>
+SALT: <random-salt>
+ENCRYPTION_KEY: <64-hex-chars>
+
+# ClickHouse
+CLICKHOUSE_URL: http://langfuse-clickhouse:8123  # HTTP for queries
+CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000  # TCP for migrations
+CLICKHOUSE_USER: default
+CLICKHOUSE_PASSWORD: <password>
+CLICKHOUSE_CLUSTER_ENABLED: false  # Single instance mode
+
+# Redis
+REDIS_CONNECTION_STRING: redis://langfuse-redis:6379
+
+# S3 (MinIO)
+LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse-events
+LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse-media
+LANGFUSE_S3_*_ENDPOINT: http://langfuse-minio:9000
+LANGFUSE_S3_*_ACCESS_KEY_ID: <minio-user>
+LANGFUSE_S3_*_SECRET_ACCESS_KEY: <minio-password>
+LANGFUSE_S3_*_FORCE_PATH_STYLE: true
+```
+
+**Deployment includes:**
+```yaml
+# Postgres StatefulSet (metadata storage)
+# ClickHouse StatefulSet (analytics)
+# Redis Deployment (queue/cache)
+# MinIO Deployment + Job (S3 storage + bucket init)
+# Langfuse Web Deployment (UI + API)
+# Langfuse Worker Deployment (background processing)
+```
+
+**Access Langfuse:**
+
+Langfuse is exposed via **NodePort 30000** for direct network access:
+
+```bash
+# Get your node's IP address
+kubectl get nodes -o wide
+# Look for the INTERNAL-IP column (e.g., 192.168.1.100)
+
+# Access Langfuse directly via NodePort (no port-forward needed!)
+# Open browser to: http://<your-node-ip>:30000
+# Example: http://192.168.1.100:30000
+
+# Or use port-forward for localhost access
+kubectl port-forward -n llm-stack svc/langfuse 30000:3000
+# Open browser to http://localhost:30000
+
+# First-time setup in the UI:
+# 1. Create your first admin account
+# 2. Create a project (e.g., "RAG Application")
+# 3. Go to Settings → API Keys
+# 4. Generate a new key pair (Public Key + Secret Key)
+# 5. Copy both keys and update your RAG application secrets
+```
+
+**Important Notes:**
+- **Port 3000** is the internal container port
+- **Port 30000** is the NodePort exposed on your node's IP
+- The `NEXTAUTH_URL` in ConfigMap uses the internal service URL for pod-to-pod communication
+- External browser access uses `http://<node-ip>:30000`
+
+See [LANGFUSE-SETUP.md](./LANGFUSE-SETUP.md) for detailed configuration guide.
+
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -686,6 +934,122 @@ spec:
 
 ## 🚀 Phase 4: Installation & Init
 
+### Quick Start for Beginners
+
+If this is your first time deploying this infrastructure, follow these steps carefully:
+
+**Step 1: Prepare Your Secrets**
+```bash
+# IMPORTANT: Before applying anything, edit the secrets file
+nano manifests/001-secrets.yaml
+
+# You MUST change these values (they're just examples):
+# - postgres-password: Choose a strong password
+# - litellm-master-key: Create a random API key
+# - meilisearch-master-key: Create another random key
+# - All Langfuse secrets (see LANGFUSE-SETUP.md for how to generate them)
+
+# Save the file when done (Ctrl+X, then Y, then Enter)
+```
+
+**Step 2: Apply Configuration in Order**
+```bash
+cd ~/llm-rag-app/llm-infrastructure
+
+# Step 2.1: Create namespace and base configuration
+sudo kubectl apply -f manifests/000-config.yaml
+sudo kubectl apply -f manifests/001-secrets.yaml
+
+# Step 2.2: Deploy storage (PostgreSQL for LiteLLM)
+sudo kubectl apply -f manifests/01-setup.yaml
+
+# Wait for PostgreSQL to be ready (this may take 1-2 minutes)
+sudo kubectl wait --for=condition=ready pod -l app=postgres -n llm-stack --timeout=300s
+
+# Step 2.3: Deploy Ollama (the AI model runner)
+sudo kubectl apply -f manifests/02-ollama-amd.yaml
+
+# Wait for Ollama to be ready (may take 2-3 minutes)
+sudo kubectl wait --for=condition=ready pod -l app=ollama -n llm-stack --timeout=600s
+
+# Step 2.4: Deploy the rest of the services
+sudo kubectl apply -f manifests/03-litellm.yaml
+sudo kubectl apply -f manifests/04-openwebui.yaml
+sudo kubectl apply -f manifests/06-chromadb.yaml
+sudo kubectl apply -f manifests/07-meilisearch.yaml
+sudo kubectl apply -f manifests/08-langfuse.yaml
+
+# Optional: Deploy Cloudflare tunnel (only if you need remote access)
+# sudo kubectl apply -f manifests/05-tunnel.yaml
+```
+
+**Step 3: Check Everything is Running**
+```bash
+# This command shows all your services
+sudo kubectl get pods -n llm-stack
+
+# You should see all pods with "Running" status:
+# - ollama-0
+# - postgres-0 (for LiteLLM)
+# - litellm-xxx
+# - chromadb-xxx
+# - meilisearch-xxx
+# - langfuse-postgres-0
+# - langfuse-clickhouse-0
+# - langfuse-redis-xxx
+# - langfuse-minio-xxx
+# - langfuse-xxx
+# - langfuse-worker-xxx
+# - openwebui-xxx (optional)
+
+# If any pod shows "Pending" or "Error", wait a bit longer
+# Or check the logs: sudo kubectl logs -n llm-stack <pod-name>
+```
+
+**Step 4: Download AI Models**
+```bash
+# These commands download the actual AI models (they're large files!)
+# The first model (llama3) is about 4.7GB
+# The embedding models are smaller (about 300-700MB each)
+
+# Download the main language model
+sudo kubectl exec -it -n llm-stack statefulset/ollama -- ollama pull llama3
+
+# Download embedding models (for understanding document meaning)
+sudo kubectl exec -it -n llm-stack statefulset/ollama -- ollama pull nomic-embed-text
+sudo kubectl exec -it -n llm-stack statefulset/ollama -- ollama pull mxbai-embed-large
+
+# Verify models are downloaded
+sudo kubectl exec -it -n llm-stack statefulset/ollama -- ollama list
+```
+
+**Step 5: Set Up Langfuse (Observability)**
+```bash
+# Find your node's IP address
+sudo kubectl get nodes -o wide
+# Look for INTERNAL-IP (e.g., 192.168.1.100)
+
+# Open your browser to http://<INTERNAL-IP>:30000
+# Example: http://192.168.1.100:30000
+
+# Follow the on-screen prompts to:
+# 1. Create your admin account
+# 2. Create a project called "RAG Application"
+# 3. Generate API keys (you'll need these later)
+```
+
+**Step 6: Test Everything Works**
+```bash
+# Test if Ollama can respond
+sudo kubectl exec -n llm-stack statefulset/ollama -- \
+  curl -s http://localhost:11434/api/generate \
+  -d '{"model":"llama3","prompt":"Say hello!","stream":false}'
+
+# If you see a JSON response with text, it works!
+```
+
+### Detailed Installation Steps (Advanced Users)
+
 1.  **Apply Manifests:**
 
     ```bash
@@ -700,6 +1064,7 @@ spec:
     sudo kubectl apply -f manifests/05-tunnel.yaml
     sudo kubectl apply -f manifests/06-chromadb.yaml
     sudo kubectl apply -f manifests/07-meilisearch.yaml
+    sudo kubectl apply -f manifests/08-langfuse.yaml
     ```
 
 2.  **Pull Models:**

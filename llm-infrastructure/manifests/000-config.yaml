@@ -20,3 +20,19 @@ data:
   # OpenWebUI Config
   openwebui-openai-base-url: "http://litellm.llm-stack.svc.cluster.local:4000"
   openwebui-ollama-base-url: "http://ollama.llm-stack.svc.cluster.local:11434"
+
+  # Langfuse Config
+  langfuse-postgres-user: "langfuse"
+  langfuse-postgres-db: "langfuse"
+  langfuse-nextauth-url: "http://langfuse.llm-stack.svc.cluster.local:3000"
+  langfuse-clickhouse-user: "default"
+
+  # Langfuse Cache (Redis/Valkey)
+  langfuse-redis-connection-string: "redis://langfuse-redis.llm-stack.svc.cluster.local:6379"
+
+  # Langfuse Blob Storage (MinIO/S3)
+  langfuse-s3-endpoint: "http://langfuse-minio.llm-stack.svc.cluster.local:9000"
+  langfuse-s3-region: "us-east-1"
+  langfuse-s3-force-path-style: "true"
+  langfuse-s3-event-bucket: "langfuse-events"
+  langfuse-s3-media-bucket: "langfuse-media"

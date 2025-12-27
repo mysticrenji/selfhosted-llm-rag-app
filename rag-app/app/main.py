@@ -24,6 +24,9 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_docling import DoclingLoader
 from langchain_openai import ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+# Langfuse for observability (LangChain integration)
+from langfuse.langchain import CallbackHandler
 from pydantic import BaseModel
 
 # Configure logging
@@ -52,6 +55,13 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "mxbai-embed-large")
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024)))  # 50MB default
 
+# Langfuse Configuration
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "http://langfuse.llm-stack.svc.cluster.local:3000")
+LANGFUSE_BASE_URL = os.getenv("LANGFUSE_BASE_URL", "http://langfuse.llm-stack.svc.cluster.local:3000")
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
+LANGFUSE_ENABLED = os.getenv("LANGFUSE_ENABLED", "true").lower() == "true"
+
 
 # --- CUSTOM MEILISEARCH RETRIEVER ---
 class MeilisearchRetriever(BaseRetriever):
@@ -77,6 +87,20 @@ class MeilisearchRetriever(BaseRetriever):
 # --- INITIALIZATION ---
 
 logger.info(f"Connecting to LiteLLM at {LLM_API_BASE}")
+
+# Initialize Langfuse
+langfuse_handler: Optional[CallbackHandler] = None
+if LANGFUSE_ENABLED and LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY:
+    try:
+        # Langfuse LangChain callback reads from environment variables:
+        # LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
+        langfuse_handler = CallbackHandler()
+        logger.info(f"Langfuse observability initialized (host: {LANGFUSE_HOST})")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Langfuse: {e}. Continuing without observability.")
+        langfuse_handler = None
+else:
+    logger.info("Langfuse observability disabled")
 
 # Custom Embeddings class for Ollama/LiteLLM compatibility (no encoding_format)
 
@@ -389,7 +413,17 @@ async def chat(query: Query):
     retrieval_chain = create_retrieval_chain(ensemble_retriever, document_chain)
 
     try:
-        response = retrieval_chain.invoke({"input": query.question})
+        # Prepare callbacks for Langfuse tracing
+        callbacks = [langfuse_handler] if langfuse_handler else []
+
+        # Add config with callbacks for LangChain observability
+        config = {}
+        if langfuse_handler:
+            config["callbacks"] = callbacks
+            # LangChain callback automatically tracks the chain execution
+            # No need to manually call trace() - it's handled by the callback
+
+        response = retrieval_chain.invoke({"input": query.question}, config=config)
 
         # Format sources
         sources = []

@@ -11,6 +11,8 @@ data:
   LLM_API_BASE: "http://litellm.llm-stack.svc.cluster.local:4000"
   EMBEDDING_MODEL: "text-embedding-3-small"
   LLM_MODEL: "llama3:latest"
+  LANGFUSE_HOST: "http://langfuse.llm-stack.svc.cluster.local:3000"
+  LANGFUSE_ENABLED: "true"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -74,6 +76,26 @@ spec:
                 secretKeyRef:
                   name: llm-stack-secret
                   key: litellm-master-key
+            - name: LANGFUSE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-api-config
+                  key: LANGFUSE_HOST
+            - name: LANGFUSE_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-api-config
+                  key: LANGFUSE_ENABLED
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: public-key
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret
+                  key: secret-key
           resources:
             requests:
               memory: "1Gi"
