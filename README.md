@@ -15,92 +15,125 @@ This project provides two integrated components:
 
 ```mermaid
 graph TB
-    subgraph "External Access"
-        User[👤 User]
-        Tunnel[Cloudflare Tunnel<br/>Port 8080]
+    subgraph "User Layer"
+        User[👤 User<br/>Web Browser]
+    end
+
+    subgraph "Network Layer"
+        CF[🔒 Cloudflare Tunnel<br/>Optional External Access<br/>HTTPS + Service Token Auth]
     end
 
     subgraph "Kubernetes Cluster - llm-stack namespace"
-        subgraph "RAG Application"
-            RAGAPI[RAG API<br/>FastAPI<br/>Port 8080<br/>---<br/>• PDF Ingestion<br/>• Query Processing<br/>• Langfuse Instrumented]
-            Frontend[Frontend<br/>HTML/JS<br/>---<br/>• File Upload<br/>• Chat Interface]
+
+        subgraph "Application Layer"
+            Frontend[📄 Frontend<br/>HTML/CSS/JS<br/>Port 8080<br/>---<br/>• Document Upload UI<br/>• Chat Interface<br/>• Statistics View]
+            RAGAPI[🤖 RAG API<br/>FastAPI Backend<br/>Port 8080<br/>---<br/>• PDF Ingestion<br/>• Hybrid Search<br/>• Query Processing<br/>• LangChain Orchestration]
         end
 
-        subgraph "LLM Infrastructure"
-            Ollama[Ollama<br/>Port 11434<br/>AMD ROCm GPU<br/>---<br/>Models:<br/>• llama3<br/>• mxbai-embed-large<br/>• nomic-embed-text]
-            LiteLLM[LiteLLM Proxy<br/>Port 4000<br/>---<br/>OpenAI-compatible API<br/>Routes to Ollama]
+        subgraph "LLM Runtime Layer"
+            LiteLLM[🔀 LiteLLM Proxy<br/>Port 4000<br/>---<br/>• OpenAI API Compatible<br/>• Request Router<br/>• Token Tracking<br/>• Model Mapping]
+            Ollama[🧠 Ollama<br/>Port 11434<br/>AMD ROCm GPU<br/>---<br/>Models:<br/>• llama3 8B<br/>• mxbai-embed-large<br/>• nomic-embed-text]
         end
 
-        subgraph "RAG Storage Layer"
-            ChromaDB[(ChromaDB<br/>Port 8000<br/>---<br/>Vector Database<br/>Embeddings Storage)]
-            Meilisearch[(Meilisearch<br/>Port 7700<br/>---<br/>Keyword Search<br/>BM25 Engine)]
+        subgraph "Document Processing Pipeline"
+            Docling[📑 Docling<br/>PDF Parser<br/>---<br/>• Layout Analysis<br/>• Table Extraction<br/>• OCR Support]
+            Splitter[✂️ Text Splitter<br/>RecursiveCharacter<br/>---<br/>• 400 char chunks<br/>• 50 char overlap]
         end
 
-        subgraph "Observability Platform - Langfuse"
-            LangfuseWeb[Langfuse Web UI<br/>Port 3000<br/>---<br/>• Dashboard<br/>• Traces Viewer<br/>• Analytics]
-            LangfuseWorker[Langfuse Worker<br/>---<br/>• Background Jobs<br/>• Data Ingestion<br/>• Migrations]
+        subgraph "Storage Layer"
+            ChromaDB[(🧠 ChromaDB<br/>Vector Database<br/>Port 8000<br/>---<br/>• Semantic Embeddings<br/>• 1024-dim vectors<br/>• Cosine Similarity<br/>• Collection: rag_documents)]
+            Meilisearch[(🔍 Meilisearch<br/>Search Engine<br/>Port 7700<br/>---<br/>• BM25 Keyword Search<br/>• Fast Indexing<br/>• Index: rag_documents<br/>• Filterable: source)]
         end
 
-        subgraph "Langfuse Storage"
-            LFPostgres[(PostgreSQL<br/>Port 5432<br/>---<br/>Metadata & State)]
-            LFClickHouse[(ClickHouse<br/>Ports 8123/9000<br/>---<br/>Traces & Analytics)]
-            LFRedis[(Redis<br/>Port 6379<br/>---<br/>Queue & Cache)]
-            LFMinIO[(MinIO S3<br/>Port 9000<br/>---<br/>Blob Storage)]
+        subgraph "Observability Platform - Langfuse v3"
+            LFWeb[📊 Langfuse Web UI<br/>Next.js Dashboard<br/>Port 3000<br/>NodePort: 30000<br/>---<br/>• Trace Viewer<br/>• Cost Analytics<br/>• Token Tracking<br/>• Session Management]
+            LFWorker[⚙️ Langfuse Worker<br/>Background Service<br/>---<br/>• Event Ingestion<br/>• Data Processing<br/>• Analytics Jobs<br/>• Migrations]
         end
 
-        subgraph "Optional Services"
-            OpenWebUI[Open WebUI<br/>Port 3000<br/>---<br/>Alternative Chat UI]
-            LiteLLMDB[(PostgreSQL<br/>Port 5432<br/>---<br/>Token Tracking)]
+        subgraph "Langfuse Data Layer"
+            LFPostgres[(🗄️ PostgreSQL<br/>Port 5432<br/>---<br/>Users, Projects<br/>API Keys, Settings)]
+            LFClickHouse[(📈 ClickHouse<br/>Ports 8123/9000<br/>---<br/>Trace Events<br/>Analytics OLAP<br/>Time-series Data)]
+            LFRedis[(⚡ Redis<br/>Port 6379<br/>---<br/>Job Queue<br/>Cache Layer)]
+            LFMinIO[(💾 MinIO S3<br/>Port 9000<br/>---<br/>Event Logs<br/>Media Files<br/>Exports)]
+        end
+
+        subgraph "Supporting Services"
+            LiteLLMDB[(🗄️ PostgreSQL<br/>LiteLLM Logs<br/>Port 5432<br/>---<br/>Token Usage<br/>Request Tracking)]
+            OpenWebUI[🖥️ Open WebUI<br/>Port 8080<br/>Optional<br/>---<br/>Alternative Chat UI]
+        end
+
+        subgraph "Hardware"
+            GPU[🎮 AMD Radeon 780M<br/>iGPU with ROCm<br/>4-8GB VRAM<br/>---<br/>FP16 Inference]
         end
     end
 
-    %% User interactions
-    User -->|Upload PDF<br/>Query Documents| Frontend
-    User -.->|Optional Remote| Tunnel
-    Tunnel -.-> RAGAPI
-    Frontend --> RAGAPI
+    %% User Interaction Flow
+    User -->|1. Access Application| Frontend
+    User -->|Optional: External Access| CF
+    CF -.->|Secure Tunnel| RAGAPI
 
-    %% Document Ingestion Flow
-    RAGAPI -->|1. Parse PDF<br/>Docling OCR| RAGAPI
-    RAGAPI -->|2. Chunk Text<br/>400 chars| RAGAPI
-    RAGAPI -->|3. Batch Embeddings<br/>mxbai-embed-large| LiteLLM
-    LiteLLM -->|Forward Request| Ollama
-    RAGAPI -->|4. Store Vectors<br/>1024 dimensions| ChromaDB
-    RAGAPI -->|5. Index Text<br/>BM25| Meilisearch
+    %% Document Ingestion Flow (Numbered Steps)
+    Frontend -->|2. Upload PDF| RAGAPI
+    RAGAPI -->|3. Parse Document| Docling
+    Docling -->|4. Extracted Text| Splitter
+    Splitter -->|5. Text Chunks| RAGAPI
+    RAGAPI -->|6. Generate Embeddings<br/>mxbai-embed-large| LiteLLM
+    LiteLLM -->|7. Forward Request| Ollama
+    Ollama -->|8. Use GPU| GPU
+    Ollama -->|9. Return Vectors| LiteLLM
+    LiteLLM -->|10. Embeddings| RAGAPI
+    RAGAPI -->|11a. Store Vectors<br/>+ Metadata| ChromaDB
+    RAGAPI -->|11b. Index Text<br/>+ Metadata| Meilisearch
 
-    %% Query Flow
-    RAGAPI -->|6. Embed Query| LiteLLM
-    RAGAPI -->|7. Vector Search<br/>top_k=5| ChromaDB
-    RAGAPI -->|8. Keyword Search<br/>top_k=5| Meilisearch
-    RAGAPI -->|9. Ensemble Retrieval<br/>Deduplicate| RAGAPI
-    RAGAPI -->|10. Generate Answer<br/>llama3 with context| LiteLLM
-    LiteLLM -->|Inference| Ollama
+    %% Query Flow (Parallel Retrieval)
+    Frontend -->|12. Ask Question| RAGAPI
+    RAGAPI -->|13. Embed Query| LiteLLM
+    LiteLLM -->|Forward| Ollama
+    Ollama -->|Query Vector| RAGAPI
+
+    RAGAPI -->|14a. Vector Search<br/>top_k=5| ChromaDB
+    RAGAPI -->|14b. Keyword Search<br/>top_k=5| Meilisearch
+
+    ChromaDB -->|15a. Relevant Chunks| RAGAPI
+    Meilisearch -->|15b. Relevant Chunks| RAGAPI
+
+    RAGAPI -->|16. Ensemble Merge<br/>Deduplicate| RAGAPI
+    RAGAPI -->|17. Build Prompt<br/>+ Context| LiteLLM
+    LiteLLM -->|18. Generate Answer<br/>llama3| Ollama
+    Ollama -->|19. Response| RAGAPI
+    RAGAPI -->|20. Answer + Sources| Frontend
 
     %% Langfuse Observability Flow
-    RAGAPI -.->|Send Traces<br/>Callbacks| LangfuseWeb
-    LangfuseWeb -->|Store Metadata| LFPostgres
-    LangfuseWeb -->|Queue Events| LFRedis
-    LangfuseWorker -->|Poll Jobs| LFRedis
-    LangfuseWorker -->|Write Analytics| LFClickHouse
-    LangfuseWorker -->|Store Blobs| LFMinIO
+    RAGAPI -.->|Trace Events<br/>LangChain Callbacks| LFWeb
+    LFWeb -->|Store Metadata| LFPostgres
+    LFWeb -->|Queue Events| LFRedis
+    LFWorker -->|Poll Jobs| LFRedis
+    LFWorker -->|Write Analytics| LFClickHouse
+    LFWorker -->|Store Blobs| LFMinIO
+    LFWeb -->|Query Analytics| LFClickHouse
 
-    %% Optional WebUI
+    %% LLM Proxy Layer
+    LiteLLM -->|Log Tokens| LiteLLMDB
     OpenWebUI -.->|Alternative UI| LiteLLM
-    LiteLLM -.->|Log Usage| LiteLLMDB
 
-    classDef userNode fill:#e1f5ff,stroke:#01579b,stroke-width:2px
-    classDef apiNode fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef llmNode fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef storageNode fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    classDef obsNode fill:#fff9c4,stroke:#f57f17,stroke-width:2px
-    classDef optionalNode fill:#f5f5f5,stroke:#757575,stroke-width:1px,stroke-dasharray: 5 5
+    %% Styling
+    classDef userClass fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
+    classDef networkClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
+    classDef appClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
+    classDef llmClass fill:#fff9c4,stroke:#f9a825,stroke-width:2px,color:#000
+    classDef storageClass fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#000
+    classDef obsClass fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#000
+    classDef hwClass fill:#ffebee,stroke:#d32f2f,stroke-width:3px,color:#000
+    classDef optionalClass fill:#f5f5f5,stroke:#9e9e9e,stroke-width:1px,stroke-dasharray:5 5,color:#666
 
-    class User,Tunnel userNode
-    class RAGAPI,Frontend apiNode
-    class Ollama,LiteLLM llmNode
-    class ChromaDB,Meilisearch,LFPostgres,LFClickHouse,LFRedis,LFMinIO,LiteLLMDB storageNode
-    class LangfuseWeb,LangfuseWorker obsNode
-    class OpenWebUI optionalNode
+    class User userClass
+    class CF networkClass
+    class Frontend,RAGAPI,Docling,Splitter appClass
+    class LiteLLM,Ollama llmClass
+    class ChromaDB,Meilisearch,LFPostgres,LFClickHouse,LFRedis,LFMinIO,LiteLLMDB storageClass
+    class LFWeb,LFWorker obsClass
+    class GPU hwClass
+    class OpenWebUI optionalClass
 ```
 
 ### Detailed RAG Query Flow

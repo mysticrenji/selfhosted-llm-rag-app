@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import meilisearch
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from langchain_chroma import Chroma
@@ -28,12 +28,42 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 # Langfuse for observability (LangChain integration)
 from langfuse.langchain import CallbackHandler
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+# Authentication
+from app.auth import (
+    Token,
+    User,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    authenticate_user,
+    create_access_token,
+    create_user,
+    get_current_user,
+    get_db,
+    get_user_by_email,
+    get_user_by_username,
+    init_db,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="RAG API", description="Self-hosted RAG with Meilisearch + Chroma Hybrid Search")
+
+
+# Initialize database on startup
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database tables on startup."""
+    try:
+        init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+
 
 # Add CORS middleware
 app.add_middleware(
@@ -68,10 +98,17 @@ class MeilisearchRetriever(BaseRetriever):
     client: Any
     index_name: str
     k: int = 5
+    filter: Optional[str] = None
 
     def _get_relevant_documents(self, query: str, *, run_manager: CallbackManagerForRetrieverRun) -> list[Document]:
         index = self.client.index(self.index_name)
-        search_results = index.search(query, {"limit": self.k})
+        search_params: dict[str, Any] = {"limit": self.k}
+
+        # Add filter if provided
+        if self.filter:
+            search_params["filter"] = self.filter
+
+        search_results = index.search(query, search_params)
 
         docs = []
         for hit in search_results["hits"]:
@@ -211,7 +248,7 @@ try:
     index = meili_client.index("rag_documents")
     # Configure searchable attributes for better accuracy
     index.update_searchable_attributes(["text"])
-    index.update_filterable_attributes(["source"])
+    index.update_filterable_attributes(["source", "user_id"])
     logger.info("Connected to Meilisearch")
 except Exception as e:
     logger.error(f"Failed to connect to Meilisearch: {e}")
@@ -255,25 +292,82 @@ async def health_check():
     }
 
 
+# --- AUTHENTICATION ENDPOINTS ---
+
+
+@app.post("/auth/register", response_model=UserResponse, tags=["Authentication"])
+async def register(user: UserCreate, db: Session = Depends(get_db)):
+    """Register a new user."""
+    # Check if username already exists
+    existing_user = get_user_by_username(db, user.username)
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+
+    # Check if email already exists
+    existing_email = get_user_by_email(db, user.email)
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Validate password length
+    if len(user.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
+
+    # Create user
+    db_user = create_user(db, user)
+    logger.info(f"User registered: {db_user.username}")
+    return db_user
+
+
+@app.post("/auth/login", response_model=Token, tags=["Authentication"])
+async def login(user_login: UserLogin, db: Session = Depends(get_db)):
+    """Authenticate user and return JWT token."""
+    user = authenticate_user(db, user_login.username, user_login.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Create access token
+    access_token = create_access_token(data={"sub": str(user.id), "username": user.username})
+    logger.info(f"User logged in: {user.username}")
+
+    return {"access_token": access_token, "token_type": "bearer", "username": user.username}
+
+
+@app.get("/auth/me", response_model=UserResponse, tags=["Authentication"])
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
+    """Get current user profile."""
+    return current_user
+
+
+# --- DOCUMENT ENDPOINTS ---
+
+
 @app.get("/stats")
-async def get_stats():
-    """Get statistics about indexed documents."""
+async def get_stats(current_user: User = Depends(get_current_user)):
+    """Get statistics about indexed documents for current user."""
     try:
+        user_id = str(current_user.id)
         stats = {"total_chunks": 0, "unique_documents": 0, "sources": []}
 
         if meili_client:
             index = meili_client.index("rag_documents")
-            index_stats = index.get_stats()
-            stats["total_chunks"] = index_stats.get("numberOfDocuments", 0)
 
-            # Get unique sources
-            if stats["total_chunks"] > 0:
-                # Fetch all documents to count unique sources
-                results = index.search("", {"limit": 1000})
-                sources = {}
-                for hit in results.get("hits", []):
+            # Search with user_id filter to get user's documents only
+            results = index.search("", {"limit": 10000, "filter": f"user_id = {user_id}"})
+            hits = results.get("hits", [])
+            stats["total_chunks"] = len(hits)
+
+            # Get unique sources for this user
+            total_chunks = int(stats["total_chunks"])  # type: ignore[call-overload]
+            if total_chunks > 0:
+                sources: dict[str, int] = {}
+                for hit in hits:
                     source = hit.get("source", "unknown")
-                    sources[source] = sources.get(source, 0) + 1
+                    if isinstance(source, str):
+                        sources[source] = sources.get(source, 0) + 1
 
                 stats["unique_documents"] = len(sources)
                 stats["sources"] = [{"name": k, "chunks": v} for k, v in sources.items()]
@@ -284,8 +378,14 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/documents")
+async def list_documents(current_user: User = Depends(get_current_user)):
+    """Alias for /stats endpoint."""
+    return await get_stats(current_user)
+
+
 @app.post("/ingest")
-async def ingest_pdf(file: UploadFile = File(...)):
+async def ingest_pdf(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     file_path = None
     try:
         # Validate file type
@@ -331,20 +431,24 @@ async def ingest_pdf(file: UploadFile = File(...)):
         # 3. Add IDs and Metadata - use consistent IDs for both stores
         doc_ids = []
         meili_docs = []
+        user_id = str(current_user.id)
 
         # Filter complex metadata that ChromaDB can't handle
         split_docs = filter_complex_metadata(split_docs)
 
         for i, doc in enumerate(split_docs):
             # Generate stable ID for text chunks
-            doc_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{file.filename}_{i}"))
+            doc_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{file.filename}_{i}_{user_id}"))
             doc_ids.append(doc_id)
             doc.metadata["source"] = file.filename
             doc.metadata["chunk_index"] = i
             doc.metadata["doc_id"] = doc_id
+            doc.metadata["user_id"] = user_id
 
             # Prepare for Meilisearch (needs explicit ID)
-            meili_docs.append({"id": doc_id, "text": doc.page_content, "source": file.filename, "chunk_index": i})
+            meili_docs.append(
+                {"id": doc_id, "text": doc.page_content, "source": file.filename, "chunk_index": i, "user_id": user_id}
+            )
 
         # 4. Index to Chroma (Vectors) with consistent IDs
         texts = [doc.page_content for doc in split_docs]
@@ -380,13 +484,20 @@ async def ingest_pdf(file: UploadFile = File(...)):
 
 
 @app.post("/chat")
-async def chat(query: Query):
+async def chat(query: Query, current_user: User = Depends(get_current_user)):
     if not vector_store or not meili_client:
         raise HTTPException(status_code=503, detail="Search engines not available")
 
-    # 1. Define Retrievers
-    chroma_retriever = vector_store.as_retriever(search_kwargs={"k": query.top_k})
-    meili_retriever = MeilisearchRetriever(client=meili_client, index_name="rag_documents", k=query.top_k)
+    user_id = str(current_user.id)
+
+    # 1. Define Retrievers with user_id filtering
+    # ChromaDB filter by user_id
+    chroma_retriever = vector_store.as_retriever(search_kwargs={"k": query.top_k, "filter": {"user_id": user_id}})
+
+    # Meilisearch filter by user_id
+    meili_retriever = MeilisearchRetriever(
+        client=meili_client, index_name="rag_documents", k=query.top_k, filter=f"user_id = {user_id}"
+    )
 
     # 2. Hybrid Search (Ensemble)
     # Weights: 0.5 for Vector, 0.5 for Keyword (adjustable)
