@@ -15,7 +15,6 @@ This project provides two integrated components:
 
 ```mermaid
 graph TB
-graph TB
     subgraph "User Layer"
         User[👤 User<br/>Web Browser]
     end
