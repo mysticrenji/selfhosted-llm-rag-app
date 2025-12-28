@@ -234,54 +234,6 @@ kubectl port-forward -n llm-stack service/rag-api 8080:8080
 # http://localhost:8080
 ```
 
-### Option 1: Local Development (Recommended for Testing)
-
-**1. Clone and Setup**
-```bash
-cd rag-app
-python3 -m venv test
-source test/bin/activate
-pip install -r requirements.txt
-```
-
-**2. Run Local Development Server**
-```bash
-./local.sh
-```
-
-This script automatically:
-- Kills existing port-forwards
-- Sets up port-forwards to K8s services (ChromaDB, Meilisearch, LiteLLM)
-- Exports environment variables
-- Starts FastAPI with auto-reload
-
-**3. Access the Application**
-- **Frontend**: http://localhost:8080
-- **API Docs**: http://localhost:8080/docs
-- **Health Check**: http://localhost:8080/health
-
-### Option 2: Kubernetes Deployment (Production)
-
-**1. Build Container Image**
-```bash
-docker build -t rag-api:latest .
-
-# For k3s, import the image
-docker save rag-api:latest | sudo k3s ctr images import -
-```
-
-**2. Deploy to Kubernetes**
-```bash
-kubectl apply -f k8s/02-rag-api.yaml
-```
-
-**3. Access via Port-Forward**
-```bash
-kubectl port-forward -n llm-stack service/rag-api 8080:8080
-```
-
-Or configure ingress/cloudflare tunnel for external access.
-
 ---
 
 ## 📚 API Usage
@@ -383,7 +335,130 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 ---
 
-## 🔧 Troubleshooting
+## � Authentication
+
+The application includes JWT-based authentication with per-user document isolation.
+
+### Authentication Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JWT_SECRET_KEY` | `your-secret-key-change-in-production` | Secret key for JWT token signing (CHANGE IN PRODUCTION!) |
+| `AUTH_DATABASE_URL` | `postgresql://langfuse:langfuse@langfuse-postgres.llm-stack.svc.cluster.local:5432/ragauth` | PostgreSQL connection for auth database | <!-- pragma: allowlist secret -->
+
+**⚠️ IMPORTANT:** Change `JWT_SECRET_KEY` to a strong random value in production:
+```bash
+# Generate a secure key
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# Update in your deployment config or secret
+```
+
+### User Management
+
+**1. Register a New User**
+```bash
+curl -X POST http://localhost:8080/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "john",
+    "email": "john@example.com",
+    "password": "SecurePass123!",  # pragma: allowlist secret
+    "full_name": "John Doe"
+  }'
+```
+
+**Response:**
+```json
+{
+  "id": 1,
+  "username": "john",
+  "email": "john@example.com",
+  "full_name": "John Doe",
+  "created_at": "2025-12-28T10:30:00"
+}
+```
+
+**2. Login**
+```bash
+curl -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "john",
+    "password": "SecurePass123!"  # pragma: allowlist secret
+  }'
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "bearer",
+  "username": "john"
+}
+```
+
+**3. Access Protected Endpoints**
+```bash
+# Get current user info
+curl -X GET http://localhost:8080/auth/me \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+
+# Upload document (with authentication)
+curl -X POST http://localhost:8080/ingest \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -F "file=@document.pdf"
+
+# Query documents (with authentication)
+curl -X POST http://localhost:8080/query \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is this about?"}'
+```
+
+### User Management Scripts
+
+Utility scripts for managing users (run from `rag-app/` directory):
+
+**List All Users:**
+```bash
+cd rag-app
+source test/bin/activate
+python delete-user.py --list
+```
+
+**Delete a User:**
+```bash
+python delete-user.py username
+```
+
+**Reset User Password:**
+```bash
+python reset-password.py username "NewPassword123!"
+```
+
+**Note:** These scripts require:
+- PostgreSQL port-forward active (runs automatically with `./local.sh`)
+- Or direct access to the auth database in Kubernetes
+
+### Security Features
+
+- ✅ **JWT Tokens**: 23-hour expiration, secure signing
+- ✅ **Password Hashing**: bcrypt with salt (12 rounds)
+- ✅ **Per-User Isolation**: Documents are isolated by user ID
+- ✅ **Email Validation**: Valid email format required
+- ✅ **Password Requirements**: Minimum 8 characters
+- ✅ **Token Verification**: All protected endpoints validate JWT
+
+### Database Schema
+
+The `ragauth` database contains:
+- **users** table: id, username, email, hashed_password, full_name, created_at, is_active
+- Documents in ChromaDB/Meilisearch include `user_id` in metadata for isolation
+
+---
+
+## �🔧 Troubleshooting
 
 ### Common Issues for Beginners
 
@@ -669,73 +744,3 @@ For issues:
 1. Check logs: `kubectl logs -n llm-stack deployment/rag-api`
 2. Verify infrastructure: `kubectl get pods -n llm-stack`
 3. Test models directly: `kubectl exec -n llm-stack pod/ollama-0 -- ollama run llama3`
-
-## Quick Start
-
-### 1. Add Meilisearch Secret
-
-You need to add a master key for Meilisearch to your existing secret.
-Run this to patch your secret (Change `my-master-key` to a secure password):
-```bash
-kubectl patch secret llm-stack-secret -n llm-stack --type='json' -p='[{"op" : "add" ,"path" : "/data/meili-master-key" ,"value" : "'"$(echo -n 'my-master-key' | base64)"'"}]'
-```
-
-### 2. Deploy Infrastructure
-
-```bash
-# Vector DB
-kubectl apply -f k8s/01-chromadb.yaml
-
-# Search Engine (New)
-kubectl apply -f k8s/03-meilisearch.yaml
-```
-
-Wait for Meilisearch to be ready:
-```bash
-kubectl wait --for=condition=ready pod -l app=meilisearch -n llm-stack --timeout=60s
-```
-
-### 3. Build & Deploy API
-
-```bash
-# Build
-docker build -t rag-api:v3 .
-
-# Import to K3s (if using k3s)
-docker save rag-api:v3 | sudo k3s ctr images import -
-
-# Deploy
-kubectl apply -f k8s/02-rag-api.yaml
-```
-
-## Architecture
-
-```
-          ┌──────────────┐
-          │  PDF Ingest  │
-          └──────┬───────┘
-                 │
-        ┌────────┴────────┐
-        ▼                 ▼
-  ┌────────────┐    ┌─────────────┐
-  │  ChromaDB  │    │ Meilisearch │
-  │ (Vectors)  │    │ (Keywords)  │
-  └─────┬──────┘    └──────┬──────┘
-        │                  │
-        └───────┬──────────┘
-                ▼
-           RRF Fusion
-                ▼
-               LLM
-```
-
-## Troubleshooting
-
-### Meilisearch Connection
-If the app log says "Failed to connect to Meilisearch":
-1. Check Pod status: `kubectl get pods -n llm-stack -l app=meilisearch`
-2. Check Service: `kubectl get svc -n llm-stack meilisearch` (Should be port 7700)
-3. verify Secret: Ensure `MEILI_MASTER_KEY` is set correctly in the secret.
-
-### Ingestion Errors
-If ingestion fails, check if the `libgl` dependencies are installed (should be fixed in v3 Dockerfile).

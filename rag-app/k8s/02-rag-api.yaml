@@ -96,6 +96,16 @@ spec:
                 secretKeyRef:
                   name: langfuse-secret
                   key: secret-key
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-stack-secret
+                  key: jwt-secret-key
+            - name: AUTH_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: llm-stack-secret
+                  key: auth-database-url
           resources:
             requests:
               memory: "1Gi"
