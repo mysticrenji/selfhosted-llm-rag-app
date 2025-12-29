@@ -1,3 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+  namespace: llm-stack
+data:
+  config.yaml: |
+    ingress:
+      - hostname: rag.geekfarmer.dev
+        service: http://rag-api.llm-stack.svc.cluster.local
+      - service: http_status:404
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,10 +29,23 @@ spec:
       containers:
       - name: cloudflared
         image: cloudflare/cloudflared:latest
-        args: ["tunnel", "--no-autoupdate", "run"]
+        args:
+          - tunnel
+          - --config
+          - /etc/cloudflared/config.yaml
+          - --no-autoupdate
+          - run
         env:
         - name: TUNNEL_TOKEN
           valueFrom:
             secretKeyRef:
               name: llm-stack-secret
               key: cloudflared-token
+        volumeMounts:
+          - name: cloudflared-config
+            mountPath: /etc/cloudflared/config.yaml
+            subPath: config.yaml
+      volumes:
+        - name: cloudflared-config
+          configMap:
+            name: cloudflared-config
