@@ -9,8 +9,8 @@ data:
   CHROMA_PORT: "8000"
   MEILI_HOST: "http://meilisearch.llm-stack.svc.cluster.local:7700"
   LLM_API_BASE: "http://litellm.llm-stack.svc.cluster.local:4000"
-  EMBEDDING_MODEL: "text-embedding-3-small"
-  LLM_MODEL: "llama3:latest"
+  EMBEDDING_MODEL: "mxbai-embed-large"
+  LLM_MODEL: "llama3"
   LANGFUSE_HOST: "http://langfuse.llm-stack.svc.cluster.local:3000"
   LANGFUSE_ENABLED: "true"
 ---
@@ -31,7 +31,7 @@ spec:
     spec:
       containers:
         - name: rag-api
-          image: ghcr.io/mysticrenji/rag-app:main
+          image: ghcr.io/mysticrenji/rag-app:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
