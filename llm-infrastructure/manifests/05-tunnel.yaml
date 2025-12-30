@@ -7,7 +7,7 @@ data:
   config.yaml: |
     ingress:
       - hostname: rag.geekfarmer.dev
-        service: http://rag-api.llm-stack.svc.cluster.local:8080
+        service: http://rag-api.llm-stack.svc.cluster.local
       - service: http_status:404
 
 ---
