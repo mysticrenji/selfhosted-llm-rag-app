@@ -9,6 +9,9 @@ This project provides two integrated components:
 1. **LLM Infrastructure Stack** (`llm-infrastructure/`) - The foundation for running local LLMs
 2. **RAG Application** (`rag-app/`) - Document Q&A system with hybrid search
 
+
+Part 1 of the walkthrough is published on Medium. [link](https://renjithvr11.medium.com/why-i-built-this-self-hosted-llm-rag-stack-059b72b4443e)
+
 ## 🏗️ Architecture
 
 ### High-Level System Architecture
